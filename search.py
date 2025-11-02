@@ -1,0 +1,235 @@
+"""
+搜索引擎模块
+提供关键词搜索和结果处理功能
+"""
+from typing import List, Dict, Optional, Tuple
+from datetime import datetime
+import re
+
+from database import db
+
+
+class SearchEngine:
+    """搜索引擎类"""
+    
+    def __init__(self):
+        self.results_per_page = 10
+    
+    async def search(
+        self,
+        query: str,
+        page: int = 0,
+        channel_filter: str = None,
+        media_type_filter: str = None,
+        date_filter: str = None
+    ) -> Tuple[List[Dict], int]:
+        """
+        执行搜索
+        
+        Args:
+            query: 搜索关键词
+            page: 页码（从0开始）
+            channel_filter: 频道过滤（@username）
+            media_type_filter: 媒体类型过滤
+            date_filter: 日期过滤（YYYY-MM-DD）
+        
+        Returns:
+            (搜索结果列表, 总页数)
+        """
+        # 解析查询字符串
+        keywords, filters = self._parse_query(query)
+        
+        # 合并过滤器
+        if channel_filter:
+            filters['channel'] = channel_filter
+        if media_type_filter:
+            filters['media_type'] = media_type_filter
+        if date_filter:
+            filters['date'] = date_filter
+        
+        # 获取频道ID（如果指定了频道过滤）
+        channel_id = None
+        if filters.get('channel'):
+            username = filters['channel'].lstrip('@')
+            channel = await db.get_channel_by_username(username)
+            if channel:
+                channel_id = channel['id']
+        
+        # 执行搜索
+        offset = page * self.results_per_page
+        results = await db.search_messages(
+            keywords=keywords,
+            channel_id=channel_id,
+            media_type=filters.get('media_type'),
+            limit=self.results_per_page,
+            offset=offset
+        )
+        
+        # 计算总页数
+        # TODO: 优化为精确计数
+        total_count = len(results)
+        total_pages = max(1, (total_count + self.results_per_page - 1) // self.results_per_page)
+        
+        return results, total_pages
+    
+    def _parse_query(self, query: str) -> Tuple[List[str], Dict[str, str]]:
+        """
+        解析查询字符串，提取关键词和过滤器
+        
+        支持的语法：
+        - 普通关键词: Python 教程
+        - 频道过滤: channel:@tech_news
+        - 类型过滤: type:video
+        - 日期过滤: date:2025-11
+        
+        Returns:
+            (关键词列表, 过滤器字典)
+        """
+        keywords = []
+        filters = {}
+        
+        # 提取过滤器
+        filter_pattern = r'(\w+):([^\s]+)'
+        for match in re.finditer(filter_pattern, query):
+            key, value = match.group(1), match.group(2)
+            filters[key.lower()] = value
+            # 从查询中移除过滤器
+            query = query.replace(match.group(0), '')
+        
+        # 剩余的是关键词
+        keywords = [kw.strip() for kw in query.split() if kw.strip()]
+        
+        return keywords, filters
+    
+    async def get_popular_keywords(self, limit: int = 10) -> List[Dict]:
+        """获取热门搜索关键词"""
+        # TODO: 实现搜索历史记录和统计
+        return []
+    
+    async def get_related_channels(self, keyword: str, limit: int = 5) -> List[Dict]:
+        """根据关键词推荐相关频道"""
+        # 在频道标题和备注中搜索
+        all_channels = await db.get_all_channels(status='active')
+        
+        related = []
+        keyword_lower = keyword.lower()
+        
+        for channel in all_channels:
+            score = 0
+            
+            # 检查频道名
+            if channel['channel_username'] and keyword_lower in channel['channel_username'].lower():
+                score += 3
+            
+            # 检查频道标题
+            if channel['channel_title'] and keyword_lower in channel['channel_title'].lower():
+                score += 2
+            
+            # 检查分类
+            if channel['category'] and keyword_lower in channel['category'].lower():
+                score += 1
+            
+            if score > 0:
+                channel['relevance_score'] = score
+                related.append(channel)
+        
+        # 按相关度排序
+        related.sort(key=lambda x: x['relevance_score'], reverse=True)
+        
+        return related[:limit]
+    
+    def highlight_keywords(self, text: str, keywords: List[str]) -> str:
+        """在文本中高亮显示关键词（用于Telegram格式）"""
+        if not keywords or not text:
+            return text
+        
+        # Telegram 支持的格式：*bold* _italic_ `code`
+        # 这里使用 *bold* 来高亮
+        highlighted = text
+        for keyword in keywords:
+            # 使用正则表达式，忽略大小写
+            pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+            highlighted = pattern.sub(f"*{keyword}*", highlighted)
+        
+        return highlighted
+    
+    def format_search_result(self, result: Dict, keywords: List[str] = None, index: int = 1) -> str:
+        """格式化单个搜索结果（优化版，带超链接）"""
+        content = result.get('content', '无标题')
+        
+        # 限制长度
+        max_length = 80
+        if len(content) > max_length:
+            content = content[:max_length] + "..."
+        
+        # 获取媒体类型emoji
+        media_type = result.get('media_type', 'text')
+        media_emoji = self._get_media_emoji(media_type)
+        
+        # 构建超链接（如果有存储消息ID）
+        storage_message_id = result.get('storage_message_id')
+        channel_username = result.get('channel_username', '')
+        
+        # 构建链接URL
+        if storage_message_id:
+            # 使用存储频道的链接
+            from config import config
+            storage_channel_id = str(config.STORAGE_CHANNEL_ID).replace('-100', '')
+            link_url = f"https://t.me/c/{storage_channel_id}/{storage_message_id}"
+        elif channel_username and result.get('message_id'):
+            # 使用原始频道链接
+            link_url = f"https://t.me/{channel_username}/{result['message_id']}"
+        else:
+            link_url = None
+        
+        # 格式化结果（带超链接）
+        if link_url:
+            # Telegram Markdown格式超链接
+            formatted = f"{index}. {media_emoji} [{content}]({link_url})"
+        else:
+            formatted = f"{index}. {media_emoji} {content}"
+        
+        # 添加视频时长（如果是视频）
+        if media_type == 'video' and result.get('video_duration'):
+            duration = result['video_duration']
+            formatted += f" ⏱️ {duration}s"
+        
+        # 添加来源（简化显示）
+        if channel_username:
+            formatted += f"\n   📺 @{channel_username}"
+        
+        # 添加时间（简化显示）
+        if result.get('publish_date'):
+            try:
+                pub_date = datetime.fromisoformat(result['publish_date'])
+                formatted += f" • {pub_date.strftime('%m-%d')}"
+            except:
+                pass
+        
+        return formatted
+    
+    def _get_media_emoji(self, media_type: str) -> str:
+        """获取媒体类型的 emoji"""
+        emoji_map = {
+            'photo': '📸',
+            'video': '🎬',
+            'document': '📎',
+            'audio': '🎵',
+            'voice': '🎤',
+        }
+        return emoji_map.get(media_type, '📄')
+    
+    async def save_search_history(
+        self,
+        user_id: int,
+        query: str,
+        results_count: int
+    ):
+        """保存搜索历史（用于分析热门关键词）"""
+        # TODO: 实现搜索历史记录
+        pass
+
+
+# 创建全局搜索引擎实例
+search_engine = SearchEngine()
+
