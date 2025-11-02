@@ -3,6 +3,8 @@ Bot 主程序
 处理用户交互、命令和按钮
 """
 import logging
+import asyncio
+import random
 from typing import Optional, List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -414,13 +416,28 @@ class TelegramBot:
         
         logger.info(f"📊 总共收集到 {len(all_links)} 个链接")
         
-        # 3. 处理所有链接
+        # 3. 处理所有链接（添加速率限制和验证）
         added_count = 0
+        skipped_count = 0
+        
         for link in all_links:
             # 使用 extractor 提取标准化的频道信息
             channels = extractor.extract_from_text(link)
             
             for channel in channels:
+                # 跳过 Bot（username 以 'bot' 结尾的）
+                if channel.username.lower().endswith('bot'):
+                    logger.info(f"⏭️ 跳过 Bot: @{channel.username}")
+                    skipped_count += 1
+                    continue
+                
+                # 检查数据库中是否已存在
+                existing = await db.get_channel_by_username(channel.username)
+                if existing:
+                    logger.info(f"⏭️ 频道已存在: @{channel.username}")
+                    skipped_count += 1
+                    continue
+                
                 # 智能分类
                 category = extractor.categorize_channel(message.text or "")
                 
@@ -429,12 +446,30 @@ class TelegramBot:
                 channel_id_str = None
                 member_count = None
                 is_verified = False
+                channel_exists = False
                 
                 try:
-                    # 使用 Bot API 获取频道信息
+                    # 添加延迟，避免触发速率限制
+                    # 基础延迟 + 随机延迟，让请求更自然
+                    base_delay = config.CHANNEL_VERIFY_DELAY
+                    random_delay = random.uniform(0, config.CHANNEL_VERIFY_RANDOM_DELAY)
+                    total_delay = base_delay + random_delay
+                    
+                    logger.debug(f"⏱️ 等待 {total_delay:.1f} 秒后验证 @{channel.username}")
+                    await asyncio.sleep(total_delay)
+                    
+                    # 使用 Bot API 获取频道信息（验证是否存在）
                     chat = await context.bot.get_chat(f"@{channel.username}")
+                    
+                    # 检查是否为频道或群组
+                    if chat.type not in ['channel', 'supergroup', 'group']:
+                        logger.warning(f"⏭️ 跳过非频道/群组: @{channel.username} (类型: {chat.type})")
+                        skipped_count += 1
+                        continue
+                    
                     channel_title = chat.title
                     channel_id_str = str(chat.id)
+                    channel_exists = True
                     
                     # 尝试获取成员数（可能需要权限）
                     try:
@@ -443,33 +478,56 @@ class TelegramBot:
                         pass
                     
                     logger.info(f"📋 获取频道信息: {channel_title} (@{channel.username})")
-                except Exception as e:
-                    logger.warning(f"⚠️ 无法获取 @{channel.username} 的详细信息: {e}")
-                
-                # 添加到数据库
-                db_id = await db.add_channel(
-                    username=channel.username,
-                    channel_id=channel_id_str,
-                    title=channel_title,
-                    discovered_from=str(message.message_id),
-                    category=category
-                )
-                
-                if db_id:
-                    added_count += 1
-                    display_name = channel_title if channel_title else f"@{channel.username}"
-                    logger.info(f"✅ 新频道: {display_name} - {category}")
                     
-                    # 如果获取到了成员数，更新到数据库
-                    if member_count:
-                        await db.update_channel_by_username(channel.username, member_count=member_count)
+                except Exception as e:
+                    error_msg = str(e)
+                    
+                    # 如果是频道不存在，跳过
+                    if "not found" in error_msg.lower() or "chat not found" in error_msg.lower():
+                        logger.warning(f"❌ 频道不存在，跳过: @{channel.username}")
+                        skipped_count += 1
+                        continue
+                    
+                    # 如果是速率限制，记录警告但继续（保存基本信息）
+                    elif "flood" in error_msg.lower() or "too many requests" in error_msg.lower():
+                        logger.warning(f"⏳ 速率限制: @{channel.username} - {error_msg}")
+                        # 继续保存，但没有详细信息
+                    
+                    # 其他错误
+                    else:
+                        logger.warning(f"⚠️ 无法获取 @{channel.username} 的详细信息: {e}")
+                
+                # 只有在频道存在或无法验证时才添加到数据库
+                # 如果明确知道频道不存在，则已经在上面 continue 跳过了
+                if channel_exists or channel_title:
+                    # 添加到数据库
+                    db_id = await db.add_channel(
+                        username=channel.username,
+                        channel_id=channel_id_str,
+                        title=channel_title,
+                        discovered_from=str(message.message_id),
+                        category=category
+                    )
+                    
+                    if db_id:
+                        added_count += 1
+                        display_name = channel_title if channel_title else f"@{channel.username}"
+                        logger.info(f"✅ 新频道: {display_name} - {category}")
+                        
+                        # 如果获取到了成员数，更新到数据库
+                        if member_count:
+                            await db.update_channel_by_username(channel.username, member_count=member_count)
         
-        if added_count > 0:
-            # 可选：回复消息确认
-            # await message.reply_text(f"✅ 已提取 {added_count} 个频道")
-            logger.info(f"📺 从消息 {message.message_id} 提取了 {added_count} 个频道")
+        # 输出统计信息
+        if added_count > 0 or skipped_count > 0:
+            summary = f"📺 消息 {message.message_id} 处理完成："
+            if added_count > 0:
+                summary += f" ✅ 新增 {added_count} 个"
+            if skipped_count > 0:
+                summary += f" ⏭️ 跳过 {skipped_count} 个"
+            logger.info(summary)
         else:
-            logger.info(f"ℹ️ 消息 {message.message_id} 中的 {len(all_links)} 个链接都已存在或无效")
+            logger.info(f"ℹ️ 消息 {message.message_id} 中没有有效的频道链接")
     
     async def handle_search_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理搜索群组的消息（执行搜索）"""

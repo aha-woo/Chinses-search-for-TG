@@ -49,6 +49,10 @@ class Config:
     SEARCH_AD_ENABLED: bool = os.getenv('SEARCH_AD_ENABLED', 'true').lower() == 'true'
     RESULTS_PER_PAGE: int = int(os.getenv('RESULTS_PER_PAGE', '10'))
     
+    # 频道验证配置
+    CHANNEL_VERIFY_DELAY: float = float(os.getenv('CHANNEL_VERIFY_DELAY', '3.0'))  # 每个频道验证间隔（秒）
+    CHANNEL_VERIFY_RANDOM_DELAY: float = float(os.getenv('CHANNEL_VERIFY_RANDOM_DELAY', '1.0'))  # 随机延迟范围（秒）
+    
     @classmethod
     def validate(cls) -> bool:
         """验证必要配置是否存在"""
