@@ -53,6 +53,10 @@ class Config:
     CHANNEL_VERIFY_DELAY: float = float(os.getenv('CHANNEL_VERIFY_DELAY', '3.0'))  # 每个频道验证间隔（秒）
     CHANNEL_VERIFY_RANDOM_DELAY: float = float(os.getenv('CHANNEL_VERIFY_RANDOM_DELAY', '1.0'))  # 随机延迟范围（秒）
     
+    # 存储频道发送配置
+    STORAGE_SEND_DELAY: float = float(os.getenv('STORAGE_SEND_DELAY', '2.0'))  # 发送到存储频道的延迟（秒）
+    STORAGE_SEND_RANDOM_DELAY: float = float(os.getenv('STORAGE_SEND_RANDOM_DELAY', '0.5'))  # 随机延迟范围（秒）
+    
     @classmethod
     def validate(cls) -> bool:
         """验证必要配置是否存在"""

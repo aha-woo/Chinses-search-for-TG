@@ -840,6 +840,14 @@ class TelegramBot:
         card += "\n━━━━━━━━━━━━━━━━━━━━"
         
         try:
+            # 添加延迟，避免触发速率限制
+            base_delay = config.STORAGE_SEND_DELAY
+            random_delay = random.uniform(0, config.STORAGE_SEND_RANDOM_DELAY)
+            total_delay = base_delay + random_delay
+            
+            logger.debug(f"⏱️ 等待 {total_delay:.1f} 秒后发送元信息到存储频道")
+            await asyncio.sleep(total_delay)
+            
             # 发送到存储频道
             await context.bot.send_message(
                 chat_id=config.STORAGE_CHANNEL_ID,
