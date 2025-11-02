@@ -370,9 +370,10 @@ class TelegramBot:
     
     async def handle_channel_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理私有频道的消息（提取链接）"""
-        message = update.message
+        # 频道消息使用 effective_message（兼容 channel_post 和 message）
+        message = update.effective_message
         
-        if not message.text:
+        if not message or not message.text:
             return
         
         # 提取频道链接
@@ -404,7 +405,11 @@ class TelegramBot:
     
     async def handle_search_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理搜索群组的消息（执行搜索）"""
-        message = update.message
+        message = update.effective_message
+        
+        if not message or not message.text:
+            return
+        
         query = message.text.strip()
         
         if not query or len(query) < 2:
@@ -715,7 +720,17 @@ class TelegramBot:
     
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """错误处理器"""
-        logger.error(f"Update {update} caused error {context.error}")
+        logger.error(f"处理更新时出错: {context.error}", exc_info=context.error)
+        
+        # 记录更新的基本信息（避免记录完整的 update 对象）
+        if update:
+            update_info = {
+                'update_id': update.update_id,
+                'message_id': update.effective_message.message_id if update.effective_message else None,
+                'chat_id': update.effective_chat.id if update.effective_chat else None,
+                'user_id': update.effective_user.id if update.effective_user else None,
+            }
+            logger.error(f"更新信息: {update_info}")
 
 
 # 创建全局 Bot 实例
