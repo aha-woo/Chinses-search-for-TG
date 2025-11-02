@@ -517,6 +517,20 @@ class TelegramBot:
                         # 如果获取到了成员数，更新到数据库
                         if member_count:
                             await db.update_channel_by_username(channel.username, member_count=member_count)
+                        
+                        # 发送频道元信息到 SearchDataStore 频道（利用 Telegram 无限存储）
+                        try:
+                            await self._save_channel_metadata_to_storage(
+                                channel_username=channel.username,
+                                channel_title=channel_title,
+                                channel_id=channel_id_str,
+                                member_count=member_count,
+                                category=category,
+                                discovered_from=str(message.message_id),
+                                context=context
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ 无法发送频道元信息到存储频道: {e}")
         
         # 输出统计信息
         if added_count > 0 or skipped_count > 0:
@@ -759,6 +773,83 @@ class TelegramBot:
                 )
     
     # ============ 辅助方法 ============
+    
+    async def _save_channel_metadata_to_storage(
+        self,
+        channel_username: str,
+        channel_title: str,
+        channel_id: str,
+        member_count: int,
+        category: str,
+        discovered_from: str = None,
+        context: ContextTypes.DEFAULT_TYPE = None
+    ):
+        """
+        将频道元信息保存到存储频道
+        利用 Telegram 的无限存储，备份频道元数据
+        这样频道信息本身也成为可搜索的数据
+        """
+        if not config.STORAGE_CHANNEL_ID:
+            return
+        
+        # 格式化频道元信息卡片
+        from datetime import datetime
+        
+        card = "📺 新频道收录\n"
+        card += "━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        # 基本信息
+        if channel_title:
+            card += f"📝 名称: {channel_title}\n"
+        card += f"🔗 用户名: @{channel_username}\n"
+        
+        if channel_id:
+            card += f"🆔 频道ID: {channel_id}\n"
+        
+        card += f"📁 分类: {category}\n"
+        
+        if member_count:
+            # 格式化成员数（带简写和完整数字）
+            if member_count >= 1000000:
+                member_str = f"{member_count/1000000:.1f}M"
+            elif member_count >= 1000:
+                member_str = f"{member_count/1000:.1f}K"
+            else:
+                member_str = str(member_count)
+            card += f"👥 成员: {member_str} ({member_count:,})\n"
+        
+        # 时间戳和来源
+        now = datetime.now()
+        card += f"🕐 收录时间: {now.strftime('%Y-%m-%d %H:%M')}\n"
+        if discovered_from:
+            card += f"📊 来源: 消息 #{discovered_from}\n"
+        
+        card += f"\n🔗 https://t.me/{channel_username}\n\n"
+        
+        # 标签（用于搜索和分类）
+        tags = ["#频道元信息", f"#{category.replace(' ', '_')}"]
+        if member_count:
+            if member_count >= 100000:
+                tags.append("#超10万")
+            elif member_count >= 10000:
+                tags.append("#超1万")
+            elif member_count >= 1000:
+                tags.append("#超1千")
+        
+        card += " ".join(tags)
+        card += "\n━━━━━━━━━━━━━━━━━━━━"
+        
+        try:
+            # 发送到存储频道
+            await context.bot.send_message(
+                chat_id=config.STORAGE_CHANNEL_ID,
+                text=card,
+                disable_web_page_preview=False  # 显示频道预览
+            )
+            logger.info(f"💾 已保存频道元信息到存储频道: @{channel_username}")
+        except Exception as e:
+            logger.error(f"❌ 保存频道元信息失败: {e}")
+            raise
     
     async def _send_search_results(
         self,
