@@ -849,12 +849,38 @@ class TelegramBot:
             await asyncio.sleep(total_delay)
             
             # 发送到存储频道
-            await context.bot.send_message(
+            sent_message = await context.bot.send_message(
                 chat_id=config.STORAGE_CHANNEL_ID,
                 text=card,
                 disable_web_page_preview=False  # 显示频道预览
             )
             logger.info(f"💾 已保存频道元信息到存储频道: @{channel_username}")
+            
+            # 将频道元信息也索引到数据库的 messages 表（这样才能被搜索到）
+            from datetime import datetime
+            
+            # 获取数据库中的频道 ID
+            channel_record = await db.get_channel_by_username(channel_username)
+            if channel_record:
+                # 构建搜索内容（包含频道名称、分类等关键信息）
+                search_content = f"频道: {channel_title or channel_username}"
+                if category:
+                    search_content += f" 分类: {category}"
+                if member_count:
+                    search_content += f" 成员: {member_count}"
+                search_content += f" #{category.replace(' ', '_')} #频道元信息"
+                
+                # 保存到 messages 表
+                await db.add_message(
+                    channel_id=channel_record['id'],
+                    message_id=str(sent_message.message_id),
+                    content=search_content,
+                    media_type='text',
+                    publish_date=datetime.now(),
+                    storage_message_id=str(sent_message.message_id)
+                )
+                logger.info(f"📇 已索引频道元信息到数据库: @{channel_username}")
+            
         except Exception as e:
             logger.error(f"❌ 保存频道元信息失败: {e}")
             raise

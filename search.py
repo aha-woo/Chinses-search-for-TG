@@ -162,6 +162,9 @@ class SearchEngine:
         if len(content) > max_length:
             content = content[:max_length] + "..."
         
+        # 转义 Markdown 特殊字符
+        content = self._escape_markdown(content)
+        
         # 获取媒体类型emoji
         media_type = result.get('media_type', 'text')
         media_emoji = self._get_media_emoji(media_type)
@@ -207,6 +210,19 @@ class SearchEngine:
                 pass
         
         return formatted
+    
+    def _escape_markdown(self, text: str) -> str:
+        """转义 Markdown 特殊字符"""
+        if not text:
+            return text
+        
+        # Telegram Markdown 特殊字符
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        
+        return text
     
     def _get_media_emoji(self, media_type: str) -> str:
         """获取媒体类型的 emoji"""
