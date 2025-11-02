@@ -62,7 +62,31 @@ python main.py
 
 ## 后台运行
 
-按 `Ctrl+C` 停止前台运行，然后：
+### 方式 1: 使用 PM2（推荐）
+
+```bash
+# 安装 PM2
+sudo npm install -g pm2
+
+# 创建日志目录
+mkdir -p logs
+
+# 启动 Bot
+pm2 start ecosystem.config.js
+
+# 保存进程
+pm2 save
+
+# 查看状态
+pm2 list
+
+# 查看日志
+pm2 logs telegram-search-bot
+```
+
+📖 **详细教程**: 查看 [PM2_GUIDE.md](PM2_GUIDE.md)
+
+### 方式 2: 使用 nohup
 
 ```bash
 nohup python main.py > bot.log 2>&1 &
@@ -71,12 +95,20 @@ nohup python main.py > bot.log 2>&1 &
 ## 查看日志
 
 ```bash
+# PM2
+pm2 logs telegram-search-bot
+
+# nohup
 tail -f bot.log
 ```
 
 ## 停止 Bot
 
 ```bash
+# PM2
+pm2 stop telegram-search-bot
+
+# nohup
 pkill -f "python main.py"
 ```
 

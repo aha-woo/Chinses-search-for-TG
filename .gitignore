@@ -24,6 +24,12 @@ data/
 # Logs
 *.log
 logs/
+*.log.*
+
+# PM2
+.pm2/
+pids/
+*.pid
 
 # IDE
 .vscode/

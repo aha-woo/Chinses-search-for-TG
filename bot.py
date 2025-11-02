@@ -3,7 +3,7 @@ Bot 主程序
 处理用户交互、命令和按钮
 """
 import logging
-from typing import Optional
+from typing import Optional, List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,

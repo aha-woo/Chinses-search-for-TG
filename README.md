@@ -98,14 +98,21 @@ python main.py --init-db
 # 前台运行（测试用）
 python main.py
 
-# 后台运行（生产环境）
+# 后台运行方式 1: 使用 PM2（推荐）
+sudo npm install -g pm2
+pm2 start ecosystem.config.js
+pm2 save
+
+# 后台运行方式 2: 使用 nohup
 nohup python main.py > bot.log 2>&1 &
 
-# 使用 systemd（推荐）
+# 后台运行方式 3: 使用 systemd
 sudo cp telegram-search-bot.service /etc/systemd/system/
 sudo systemctl enable telegram-search-bot
 sudo systemctl start telegram-search-bot
 ```
+
+📖 **进程管理**: 查看 [PM2_GUIDE.md](PM2_GUIDE.md)
 
 ## 使用指南
 

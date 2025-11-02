@@ -133,7 +133,8 @@ app = Application()
 def signal_handler(signum, frame):
     """信号处理器（用于优雅退出）"""
     logger.info(f"📥 收到信号 {signum}，准备退出...")
-    asyncio.create_task(app.stop())
+    # 设置停止标志
+    app.is_running = False
 
 
 async def main():
@@ -165,6 +166,11 @@ async def main():
     try:
         # 启动应用
         await app.start()
+        
+        # 保持运行直到收到停止信号
+        while app.is_running:
+            await asyncio.sleep(1)
+            
     except KeyboardInterrupt:
         logger.info("⌨️ 收到键盘中断")
     except Exception as e:
