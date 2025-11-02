@@ -46,6 +46,7 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("crawler_on", self.cmd_crawler_on))
         self.app.add_handler(CommandHandler("crawler_off", self.cmd_crawler_off))
         self.app.add_handler(CommandHandler("add_channel", self.cmd_add_channel))
+        self.app.add_handler(CommandHandler("list", self.cmd_list_channels))
         
         # 注册消息处理器（监听私有频道）
         self.app.add_handler(MessageHandler(
@@ -129,20 +130,16 @@ class TelegramBot:
                 InlineKeyboardButton("🔍 搜索", callback_data='menu_search'),
                 InlineKeyboardButton("📊 统计", callback_data='menu_stats')
             ],
+            [
+                InlineKeyboardButton("📺 频道列表", callback_data='menu_list'),
+                InlineKeyboardButton("❓ 帮助", callback_data='menu_help')
+            ],
         ]
         
         if is_admin:
             keyboard.append([
-                InlineKeyboardButton("📺 频道", callback_data='menu_channels'),
-                InlineKeyboardButton("📈 报表", callback_data='menu_report')
-            ])
-            keyboard.append([
-                InlineKeyboardButton("⚙️ 设置", callback_data='menu_settings'),
-                InlineKeyboardButton("❓ 帮助", callback_data='menu_help')
-            ])
-        else:
-            keyboard.append([
-                InlineKeyboardButton("❓ 帮助", callback_data='menu_help')
+                InlineKeyboardButton("📈 报表", callback_data='menu_report'),
+                InlineKeyboardButton("⚙️ 设置", callback_data='menu_settings')
             ])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -154,6 +151,12 @@ class TelegramBot:
         help_text = "📖 使用帮助\n"
         help_text += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
+        help_text += "📺 频道管理：\n"
+        help_text += "/list - 查看已收集的频道列表\n"
+        help_text += "  • 支持分类筛选\n"
+        help_text += "  • 支持翻页浏览\n"
+        help_text += "  • 显示频道链接\n\n"
+        
         help_text += "🔍 搜索功能：\n"
         help_text += "/search Python - 基础搜索\n"
         help_text += "/search Python type:video - 只搜视频\n"
@@ -164,9 +167,9 @@ class TelegramBot:
         
         if config.is_admin(update.effective_user.id):
             help_text += "👑 管理员命令：\n"
-            help_text += "/channels - 查看频道列表\n"
+            help_text += "/channels - 管理员频道列表\n"
             help_text += "/report - 详细报表\n"
-            help_text += "/add_channel <链接> - 添加频道\n"
+            help_text += "/add_channel <链接> - 手动添加频道\n"
             help_text += "/crawler_status - 查看爬虫状态\n"
             help_text += "/crawler_on - 启用爬虫\n"
             help_text += "/crawler_off - 禁用爬虫\n\n"
@@ -366,6 +369,11 @@ class TelegramBot:
                 f"ℹ️ 频道已存在: @{channel.username}"
             )
     
+    async def cmd_list_channels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """处理 /list 命令 - 显示已收集的频道列表"""
+        # 显示频道列表首页（带分类按钮）
+        await self._show_channels_list_page(update.message, page=0, category=None)
+    
     # ============ 消息处理器 ============
     
     async def handle_channel_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -455,10 +463,21 @@ class TelegramBot:
             report = await report_generator.generate_overview_report()
             await query.message.reply_text(report)
         
+        elif data == 'menu_list':
+            await self._show_channels_list_page(query.message, page=0, category=None)
+        
         elif data == 'menu_channels':
+            # 管理员专用功能
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             await self._show_channels_page(query.message, page=0)
         
         elif data == 'menu_report':
+            # 管理员专用功能
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             keyboard = [
                 [InlineKeyboardButton("📊 总体统计", callback_data='report_overview')],
                 [InlineKeyboardButton("📺 频道列表", callback_data='report_channels')],
@@ -469,6 +488,10 @@ class TelegramBot:
             await query.message.reply_text("📈 请选择报表类型：", reply_markup=reply_markup)
         
         elif data == 'menu_settings':
+            # 管理员专用功能
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             await query.message.reply_text(
                 "⚙️ 设置\n\n"
                 "使用命令管理爬虫:\n"
@@ -480,29 +503,47 @@ class TelegramBot:
         elif data == 'menu_help':
             await self.cmd_help(update, context)
         
-        # 报表回调
+        # 报表回调（管理员专用）
         elif data == 'report_overview':
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             report = await report_generator.generate_overview_report()
             await query.message.reply_text(report)
         
         elif data == 'report_channels':
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             await self._show_channels_page(query.message, page=0)
         
         elif data == 'report_categories':
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             report = await report_generator.generate_category_report()
             await query.message.reply_text(report)
         
         elif data == 'report_top':
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             report = await report_generator.generate_top_channels_report(limit=10)
             await query.message.reply_text(report)
         
-        # 频道列表翻页
+        # 频道列表翻页（管理员专用）
         elif data.startswith('channels_page_'):
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             page = int(data.split('_')[-1])
             await self._show_channels_page(query.message, page=page, edit=True)
         
-        # 爬虫开关
+        # 爬虫开关（管理员专用）
         elif data == 'crawler_toggle':
+            if not config.is_admin(query.from_user.id):
+                await query.answer("⛔ 此功能仅管理员可用", show_alert=True)
+                return
             current_status = await db.get_crawler_status()
             new_status = not current_status
             await db.set_crawler_status(new_status)
@@ -564,6 +605,38 @@ class TelegramBot:
                     page=page,
                     total_pages=total_pages,
                     media_filter=media_filter,
+                    edit=True
+                )
+        
+        # 频道列表 - 分类筛选
+        elif data.startswith('list_cat_'):
+            parts = data.split('_')
+            if len(parts) >= 3:
+                category = parts[2]
+                page = int(parts[3]) if len(parts) > 3 else 0
+                
+                # 显示筛选后的列表
+                category_filter = None if category == 'all' else category
+                await self._show_channels_list_page(
+                    message=query.message,
+                    page=page,
+                    category=category_filter,
+                    edit=True
+                )
+        
+        # 频道列表 - 翻页
+        elif data.startswith('list_page_'):
+            parts = data.split('_')
+            if len(parts) >= 3:
+                category = parts[2]
+                page = int(parts[3]) if len(parts) > 3 else 0
+                
+                # 显示指定页
+                category_filter = None if category == 'all' else category
+                await self._show_channels_list_page(
+                    message=query.message,
+                    page=page,
+                    category=category_filter,
                     edit=True
                 )
     
@@ -715,6 +788,149 @@ class TelegramBot:
             await message.edit_text(report, reply_markup=reply_markup)
         else:
             await message.reply_text(report, reply_markup=reply_markup)
+    
+    async def _show_channels_list_page(self, message, page: int = 0, category: str = None, edit: bool = False):
+        """显示用户友好的频道列表（带分类筛选）"""
+        per_page = 15
+        
+        # 获取统计信息
+        total_channels = await db.get_channels_count()
+        category_stats = await db.get_channels_by_category()
+        
+        # 获取频道列表
+        channels = await db.get_all_channels(
+            category=category,
+            limit=per_page,
+            offset=page * per_page
+        )
+        
+        # 计算总页数
+        if category:
+            filtered_count = category_stats.get(category, 0)
+        else:
+            filtered_count = total_channels
+        total_pages = max(1, (filtered_count + per_page - 1) // per_page)
+        
+        # 构建消息
+        response = "📺 已收集的频道列表\n"
+        response += "━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        response += f"📊 总计: {total_channels} 个频道\n"
+        if category:
+            response += f"📁 当前分类: {category} ({filtered_count} 个)\n"
+        response += f"📄 第 {page + 1}/{total_pages} 页\n\n"
+        
+        if not channels:
+            response += "😔 暂无频道数据\n\n"
+            response += "💡 转发包含频道链接的消息到收集频道即可自动提取"
+        else:
+            for i, ch in enumerate(channels, 1):
+                # 简化显示
+                num = page * per_page + i
+                username = ch['channel_username']
+                cat = ch['category']
+                
+                # 状态图标
+                status_emoji = "✅" if ch['status'] == 'active' else "⏳"
+                
+                response += f"{num}. {status_emoji} @{username}\n"
+                response += f"   📁 {cat}\n"
+                
+                # 显示链接
+                response += f"   🔗 https://t.me/{username}\n\n"
+        
+        # 创建按钮
+        keyboard = []
+        
+        # 第一行：分类筛选按钮
+        category_buttons = []
+        category_buttons.append(
+            InlineKeyboardButton(
+                "📝 全部" if not category else "全部",
+                callback_data='list_cat_all_0'
+            )
+        )
+        
+        # 显示前3个最多的分类
+        sorted_cats = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)[:3]
+        for cat_name, count in sorted_cats:
+            emoji = self._get_category_emoji(cat_name)
+            button_text = f"{emoji} {cat_name}" if category != cat_name else cat_name
+            category_buttons.append(
+                InlineKeyboardButton(
+                    button_text,
+                    callback_data=f'list_cat_{cat_name}_0'
+                )
+            )
+        
+        if category_buttons:
+            # 分成两行显示
+            keyboard.append(category_buttons[:2])
+            if len(category_buttons) > 2:
+                keyboard.append(category_buttons[2:])
+        
+        # 第二行：翻页按钮
+        if total_pages > 1:
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append(
+                    InlineKeyboardButton(
+                        "◀️ 上一页",
+                        callback_data=f'list_page_{category or "all"}_{page-1}'
+                    )
+                )
+            
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    f"{page+1}/{total_pages}",
+                    callback_data='noop'
+                )
+            )
+            
+            if page < total_pages - 1:
+                nav_buttons.append(
+                    InlineKeyboardButton(
+                        "下一页 ▶️",
+                        callback_data=f'list_page_{category or "all"}_{page+1}'
+                    )
+                )
+            
+            if nav_buttons:
+                keyboard.append(nav_buttons)
+        
+        # 第三行：刷新按钮
+        keyboard.append([
+            InlineKeyboardButton("🔄 刷新", callback_data=f'list_page_{category or "all"}_{page}')
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # 发送或编辑消息
+        try:
+            if edit and hasattr(message, 'edit_text'):
+                await message.edit_text(response, reply_markup=reply_markup, disable_web_page_preview=True)
+            else:
+                await message.reply_text(response, reply_markup=reply_markup, disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"显示频道列表失败: {e}")
+            await message.reply_text(response, reply_markup=reply_markup)
+    
+    def _get_category_emoji(self, category: str) -> str:
+        """获取分类 emoji"""
+        emoji_map = {
+            '新闻资讯': '📰',
+            '科技数码': '📱',
+            '影视资源': '🎬',
+            '软件工具': '🔧',
+            '电子书籍': '📚',
+            '学习教育': '🎓',
+            '资源分享': '📦',
+            '娱乐休闲': '🎮',
+            '生活服务': '🏪',
+            '金融投资': '💰',
+            '其他': '📁',
+        }
+        return emoji_map.get(category, '📁')
     
     # ============ 错误处理 ============
     
