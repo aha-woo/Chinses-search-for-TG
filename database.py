@@ -175,13 +175,26 @@ class Database:
             return [dict(row) for row in rows]
     
     async def update_channel(self, channel_id: int, **kwargs):
-        """更新频道信息"""
+        """更新频道信息（按数据库ID）"""
         if not kwargs:
             return
         
         set_clause = ", ".join([f"{key} = ?" for key in kwargs.keys()])
         query = f"UPDATE channels SET {set_clause} WHERE id = ?"
         params = list(kwargs.values()) + [channel_id]
+        
+        async with self.get_connection() as conn:
+            await conn.execute(query, params)
+            await conn.commit()
+    
+    async def update_channel_by_username(self, username: str, **kwargs):
+        """更新频道信息（按用户名）"""
+        if not kwargs:
+            return
+        
+        set_clause = ", ".join([f"{key} = ?" for key in kwargs.keys()])
+        query = f"UPDATE channels SET {set_clause} WHERE channel_username = ?"
+        params = list(kwargs.values()) + [username]
         
         async with self.get_connection() as conn:
             await conn.execute(query, params)

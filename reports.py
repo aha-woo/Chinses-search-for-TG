@@ -75,25 +75,41 @@ class ReportGenerator:
             report += f"📁 分类: {category}\n"
         report += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
+        # 表格形式显示（管理员版 - 更详细）
+        report += "```\n"
+        report += f"{'#':<3} {'频道名称':<18} {'用户名':<13} {'分类':<8} {'成员':<7}\n"
+        report += f"{'-'*3} {'-'*18} {'-'*13} {'-'*8} {'-'*7}\n"
+        
         for i, channel in enumerate(channels, 1):
+            num = offset + i
+            username = channel['channel_username']
+            title = channel.get('channel_title') or '未知'
+            category_name = channel['category']
+            member_count = channel.get('member_count') or 0
+            
+            # 截断过长的文本
+            if len(title) > 16:
+                title = title[:13] + '...'
+            if len(username) > 11:
+                username = username[:8] + '...'
+            if len(category_name) > 6:
+                category_name = category_name[:4] + '..'
+            
+            # 格式化成员数
+            if member_count >= 1000:
+                member_str = f"{member_count/1000:.1f}K"
+            else:
+                member_str = str(member_count)
+            
             status_emoji = self._get_status_emoji(channel['status'])
-            verified_emoji = "✅" if channel['is_verified'] else ""
             
-            report += f"{offset + i}. {status_emoji} {verified_emoji}\n"
-            report += f"   @{channel['channel_username']}\n"
-            
-            if channel['channel_title']:
-                report += f"   📝 {channel['channel_title']}\n"
-            
-            report += f"   📁 {channel['category']}\n"
-            
-            if channel['member_count']:
-                report += f"   👥 {channel['member_count']:,} 成员\n"
-            
-            discovered = datetime.fromisoformat(channel['discovered_date'])
-            report += f"   🕐 {discovered.strftime('%Y-%m-%d')}\n"
-            
-            report += "\n"
+            report += f"{num:<3} {title:<18} @{username:<12} {category_name:<8} {member_str:<7}\n"
+        
+        report += "```\n\n"
+        
+        # 添加详细信息说明
+        report += "💡 使用 /list 查看完整频道信息\n"
+        report += "🔗 点击用户名可直接访问频道"
         
         return report, total_pages
     

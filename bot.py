@@ -381,35 +381,95 @@ class TelegramBot:
         # 频道消息使用 effective_message（兼容 channel_post 和 message）
         message = update.effective_message
         
-        if not message or not message.text:
+        if not message:
             return
         
-        # 提取频道链接
-        channels = extractor.extract_from_text(message.text)
+        # 收集所有链接（从文本和实体中）
+        all_links = []
         
-        if not channels:
+        # 1. 从纯文本中提取链接
+        if message.text:
+            text_channels = extractor.extract_from_text(message.text)
+            all_links.extend([ch.url for ch in text_channels])
+            logger.info(f"📝 从文本提取到 {len(text_channels)} 个链接")
+        
+        # 2. 从 MessageEntity 中提取链接
+        if message.entities:
+            for entity in message.entities:
+                # TEXT_LINK: 链接隐藏在文字中
+                if entity.type == 'text_link' and entity.url:
+                    all_links.append(entity.url)
+                # URL: 纯文本URL（已经在上面提取过了，这里可以跳过）
+                elif entity.type == 'url' and message.text:
+                    url_text = message.text[entity.offset:entity.offset + entity.length]
+                    all_links.append(url_text)
+            
+            entity_count = len([e for e in message.entities if e.type in ['text_link', 'url']])
+            if entity_count > 0:
+                logger.info(f"🔗 从实体提取到 {entity_count} 个链接")
+        
+        if not all_links:
+            logger.debug(f"⚠️ 消息 {message.message_id} 中没有找到任何链接")
             return
         
+        logger.info(f"📊 总共收集到 {len(all_links)} 个链接")
+        
+        # 3. 处理所有链接
         added_count = 0
-        for channel in channels:
-            # 智能分类
-            category = extractor.categorize_channel(message.text)
+        for link in all_links:
+            # 使用 extractor 提取标准化的频道信息
+            channels = extractor.extract_from_text(link)
             
-            # 添加到数据库
-            channel_id = await db.add_channel(
-                username=channel.username,
-                discovered_from=str(message.message_id),
-                category=category
-            )
-            
-            if channel_id:
-                added_count += 1
-                logger.info(f"✅ 新频道: @{channel.username} - {category}")
+            for channel in channels:
+                # 智能分类
+                category = extractor.categorize_channel(message.text or "")
+                
+                # 尝试获取频道的详细信息（名称、成员数等）
+                channel_title = None
+                channel_id_str = None
+                member_count = None
+                is_verified = False
+                
+                try:
+                    # 使用 Bot API 获取频道信息
+                    chat = await context.bot.get_chat(f"@{channel.username}")
+                    channel_title = chat.title
+                    channel_id_str = str(chat.id)
+                    
+                    # 尝试获取成员数（可能需要权限）
+                    try:
+                        member_count = await context.bot.get_chat_member_count(chat.id)
+                    except:
+                        pass
+                    
+                    logger.info(f"📋 获取频道信息: {channel_title} (@{channel.username})")
+                except Exception as e:
+                    logger.warning(f"⚠️ 无法获取 @{channel.username} 的详细信息: {e}")
+                
+                # 添加到数据库
+                db_id = await db.add_channel(
+                    username=channel.username,
+                    channel_id=channel_id_str,
+                    title=channel_title,
+                    discovered_from=str(message.message_id),
+                    category=category
+                )
+                
+                if db_id:
+                    added_count += 1
+                    display_name = channel_title if channel_title else f"@{channel.username}"
+                    logger.info(f"✅ 新频道: {display_name} - {category}")
+                    
+                    # 如果获取到了成员数，更新到数据库
+                    if member_count:
+                        await db.update_channel_by_username(channel.username, member_count=member_count)
         
         if added_count > 0:
             # 可选：回复消息确认
             # await message.reply_text(f"✅ 已提取 {added_count} 个频道")
             logger.info(f"📺 从消息 {message.message_id} 提取了 {added_count} 个频道")
+        else:
+            logger.info(f"ℹ️ 消息 {message.message_id} 中的 {len(all_links)} 个链接都已存在或无效")
     
     async def handle_search_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理搜索群组的消息（执行搜索）"""
@@ -824,20 +884,32 @@ class TelegramBot:
             response += "😔 暂无频道数据\n\n"
             response += "💡 转发包含频道链接的消息到收集频道即可自动提取"
         else:
+            # 表格形式显示
+            response += "```\n"
+            response += f"{'序号':<4} {'频道名称':<20} {'用户名':<15}\n"
+            response += f"{'-'*4} {'-'*20} {'-'*15}\n"
+            
             for i, ch in enumerate(channels, 1):
-                # 简化显示
                 num = page * per_page + i
                 username = ch['channel_username']
-                cat = ch['category']
+                title = ch.get('channel_title') or '未知'
                 
-                # 状态图标
-                status_emoji = "✅" if ch['status'] == 'active' else "⏳"
+                # 截断过长的名称
+                if len(title) > 18:
+                    title = title[:15] + '...'
+                if len(username) > 13:
+                    username = username[:10] + '...'
                 
-                response += f"{num}. {status_emoji} @{username}\n"
-                response += f"   📁 {cat}\n"
-                
-                # 显示链接
-                response += f"   🔗 https://t.me/{username}\n\n"
+                response += f"{num:<4} {title:<20} @{username:<14}\n"
+            
+            response += "```\n\n"
+            
+            # 添加分类说明
+            if category:
+                response += f"📁 分类: {category}\n"
+            
+            # 添加链接提示
+            response += "💡 点击用户名可直接访问频道"
         
         # 创建按钮
         keyboard = []
