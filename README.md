@@ -251,14 +251,32 @@ rm data/channels.db
 python main.py --init-db
 ```
 
-## 更新日志
+## 📚 文档
 
-### v1.0.0 (2025-11-02)
-- ✅ 初始版本
-- ✅ 频道链接提取
-- ✅ 搜索功能
-- ✅ 统计报表
-- ✅ UserBot 爬取（可选）
+### 主要文档
+- [使用指南](USAGE.md) - 详细使用说明
+- [更新日志](CHANGELOG.md) - 版本更新历史
+- [功能说明](docs/features/FEATURES.md) - 功能详细说明
+
+### 部署和配置指南
+- [快速开始](docs/guides/QUICKSTART.md) - 快速开始指南
+- [部署指南](docs/guides/DEPLOYMENT.md) - 部署步骤
+- [PM2 管理指南](docs/guides/PM2_GUIDE.md) - PM2 进程管理
+- [爬虫设置指南](docs/guides/CRAWLER_SETUP_GUIDE.md) - UserBot 爬虫配置
+- [延迟配置指南](docs/guides/DELAY_CONFIG_GUIDE.md) - 速率限制配置
+
+### 功能指南
+- [群组搜索指南](docs/guides/GROUP_SEARCH_GUIDE.md) - 群组搜索功能
+- [搜索系统说明](docs/guides/SEARCH_SYSTEM_EXPLAINED.md) - 搜索实现原理
+- [项目结构](docs/guides/PROJECT_STRUCTURE.md) - 代码结构说明
+
+### 功能文档
+- [频道列表功能](docs/features/FEATURE_CHANNEL_LIST.md) - 频道列表功能说明
+- [频道元信息存储](docs/features/FEATURE_CHANNEL_METADATA_v1.3.0.md) - 元信息存储功能
+
+## 📋 更新日志
+
+详细的版本更新历史请查看 [CHANGELOG.md](CHANGELOG.md)
 
 ## 许可证
 
