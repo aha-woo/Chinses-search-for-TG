@@ -305,6 +305,43 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
     
+    async def search_messages_count(
+        self,
+        keywords: List[str],
+        channel_id: int = None,
+        media_type: str = None
+    ) -> int:
+        """搜索消息总数（用于计算分页）"""
+        query = """
+            SELECT COUNT(*) as count
+            FROM messages m
+            WHERE 1=1
+        """
+        params = []
+        
+        # 关键词搜索
+        if keywords:
+            conditions = []
+            for keyword in keywords:
+                conditions.append("m.content LIKE ?")
+                params.append(f"%{keyword}%")
+            query += f" AND ({' OR '.join(conditions)})"
+        
+        # 频道过滤
+        if channel_id:
+            query += " AND m.channel_id = ?"
+            params.append(channel_id)
+        
+        # 媒体类型过滤
+        if media_type:
+            query += " AND m.media_type = ?"
+            params.append(media_type)
+        
+        async with self.get_connection() as conn:
+            cursor = await conn.execute(query, params)
+            row = await cursor.fetchone()
+            return row['count'] if row else 0
+    
     async def get_messages_count(self, channel_id: int = None) -> int:
         """获取消息数量"""
         query = "SELECT COUNT(*) as count FROM messages"

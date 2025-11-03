@@ -920,7 +920,7 @@ class TelegramBot:
             response += f"📢 {config.SEARCH_AD_TEXT}\n"
             response += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        # 2. 搜索结果
+        # 2. 搜索结果（参照截图格式：简洁清晰）
         if not results:
             response += f"🔍 搜索: \"{query}\"\n\n"
             response += "😔 未找到相关内容\n\n"
@@ -929,20 +929,24 @@ class TelegramBot:
             response += "• 检查拼写是否正确\n"
             response += "• 使用更通用的词语"
         else:
-            response += f"🔍 搜索: \"{query}\"\n"
-            if media_filter:
-                response += f"📁 类型: {self._get_media_type_name(media_filter)}\n"
-            response += f"━━━━━━━━━━━━━━━━━━━━\n"
-            response += f"📊 找到 {len(results)} 条结果\n\n"
+            # 显示总数（简洁格式，参照截图）
+            keywords, _ = search_engine._parse_query(query)
+            total_count = await db.search_messages_count(
+                keywords=keywords,
+                media_type=media_filter
+            )
+            response += f"找到 {total_count} 条结果\n\n"
             
-            # 格式化每条结果
+            # 格式化每条结果（简洁格式：文字本身就是超链接，紧密排列）
             for i, result in enumerate(results, 1):
+                # 计算实际索引（考虑分页）
+                actual_index = page * config.RESULTS_PER_PAGE + i
                 result_text = search_engine.format_search_result(
                     result,
                     keywords=[query],
-                    index=i
+                    index=actual_index
                 )
-                response += result_text + "\n\n"
+                response += result_text + "\n"  # 只换行，不空行
         
         # 3. 类型分类按钮
         keyboard = []
@@ -957,19 +961,22 @@ class TelegramBot:
         keyboard.append(type_buttons)
         
         # 第二行：翻页按钮
-        if total_pages > 1 or page > 0:
+        if total_pages > 1:
             nav_buttons = []
             
+            # 上一页按钮（如果不是第一页）
             if page > 0:
                 nav_buttons.append(
                     InlineKeyboardButton("◀️ 上一页", callback_data=f'search_page_{query}_{media_filter or "all"}_{page-1}')
                 )
             
+            # 页码显示
             nav_buttons.append(
-                InlineKeyboardButton(f"{page+1}/{max(total_pages, 1)}", callback_data='noop')
+                InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data='noop')
             )
             
-            if results and len(results) >= config.RESULTS_PER_PAGE:
+            # 下一页按钮（如果不是最后一页）
+            if page < total_pages - 1:
                 nav_buttons.append(
                     InlineKeyboardButton("下一页 ▶️", callback_data=f'search_page_{query}_{media_filter or "all"}_{page+1}')
                 )
@@ -979,30 +986,38 @@ class TelegramBot:
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # 发送消息（不使用 Markdown，避免解析错误）
-        # 如果内容中包含特殊字符，Markdown 格式容易出错
-        # 改用纯文本模式，确保稳定可靠
+        # 发送消息（使用 Markdown 模式，支持超链接格式）
         try:
             if edit and hasattr(message, 'edit_text'):
                 await message.edit_text(
                     response,
                     reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN,
                     disable_web_page_preview=True
                 )
             else:
                 await message.reply_text(
                     response,
                     reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN,
                     disable_web_page_preview=True
                 )
         except Exception as e:
-            logger.error(f"发送搜索结果失败: {e}", exc_info=True)
-            # 如果还是失败，尝试最简单的纯文本（没有按钮）
+            logger.error(f"发送搜索结果失败 (Markdown): {e}", exc_info=True)
+            # 如果 Markdown 解析失败，回退到纯文本模式
             try:
                 if edit and hasattr(message, 'edit_text'):
-                    await message.edit_text(response)
+                    await message.edit_text(
+                        response,
+                        reply_markup=reply_markup,
+                        disable_web_page_preview=True
+                    )
                 else:
-                    await message.reply_text(response)
+                    await message.reply_text(
+                        response,
+                        reply_markup=reply_markup,
+                        disable_web_page_preview=True
+                    )
             except Exception as e2:
                 logger.error(f"发送搜索结果完全失败: {e2}", exc_info=True)
     

@@ -55,7 +55,17 @@ class SearchEngine:
             if channel:
                 channel_id = channel['id']
         
-        # 执行搜索
+        # 先计算总数（用于分页）
+        total_count = await db.search_messages_count(
+            keywords=keywords,
+            channel_id=channel_id,
+            media_type=filters.get('media_type')
+        )
+        
+        # 计算总页数
+        total_pages = max(1, (total_count + self.results_per_page - 1) // self.results_per_page)
+        
+        # 执行搜索（只获取当前页的数据）
         offset = page * self.results_per_page
         results = await db.search_messages(
             keywords=keywords,
@@ -64,11 +74,6 @@ class SearchEngine:
             limit=self.results_per_page,
             offset=offset
         )
-        
-        # 计算总页数
-        # TODO: 优化为精确计数
-        total_count = len(results)
-        total_pages = max(1, (total_count + self.results_per_page - 1) // self.results_per_page)
         
         return results, total_pages
     
@@ -154,34 +159,33 @@ class SearchEngine:
         return highlighted
     
     def format_search_result(self, result: Dict, keywords: List[str] = None, index: int = 1) -> str:
-        """格式化单个搜索结果（优化版，带超链接）"""
+        """格式化单个搜索结果（简洁格式：文字本身就是超链接）"""
         content = result.get('content', '无标题')
         
         # 判断是否是频道元信息
         is_channel_metadata = '#频道元信息' in content or '分类:' in content
         
-        # 如果是频道元信息，提取频道名称（内容的第一部分）
+        # 如果是频道元信息，提取频道名称作为显示内容（不要用户名）
         if is_channel_metadata:
             # 内容格式：频道名称 用户名 分类:xxx 成员:xxx #标签
             parts = content.split()
-            channel_name = parts[0] if parts else content
-            # 限制长度，但保持可读性
-            max_length = 100
+            display_content = parts[0] if parts else content  # 只显示频道名称
         else:
-            # 普通消息内容
-            channel_name = None
-            max_length = 80
+            # 普通消息内容，限制长度
+            display_content = content
+            max_length = 100
+            if len(display_content) > max_length:
+                display_content = display_content[:max_length] + "..."
         
-        # 限制显示长度
-        if len(content) > max_length:
-            content = content[:max_length] + "..."
+        # 转义 Markdown 特殊字符（避免链接格式被破坏）
+        display_content = self._escape_markdown_for_link(display_content)
         
         # 获取媒体类型emoji
         media_type = result.get('media_type', 'text')
         
-        # 如果是频道元信息，使用特殊图标
+        # 如果是频道元信息，使用频道图标
         if is_channel_metadata:
-            media_emoji = "📺"  # 频道图标
+            media_emoji = "📺"
         else:
             media_emoji = self._get_media_emoji(media_type)
         
@@ -201,40 +205,13 @@ class SearchEngine:
         else:
             link_url = None
         
-        # 格式化结果
-        if is_channel_metadata:
-            # 频道元信息格式
-            formatted = f"{index}. {media_emoji} {channel_name or content}"
-            if channel_username:
-                formatted += f" (@{channel_username})"
-        else:
-            # 普通消息格式
-            formatted = f"{index}. {media_emoji} {content}"
-        
-        # 添加链接
+        # 格式化结果：文字本身就是超链接（Markdown 格式）
         if link_url:
-            formatted += f"\n   🔗 {link_url}"
-        
-        # 添加视频时长（如果是视频）
-        if media_type == 'video' and result.get('video_duration'):
-            duration = result['video_duration']
-            formatted += f" ⏱️ {duration}s"
-        
-        # 添加来源（简化显示）
-        if channel_username and not is_channel_metadata:
-            formatted += f"\n   📺 @{channel_username}"
-        
-        # 添加时间（简化显示）
-        if result.get('publish_date'):
-            try:
-                pub_date = datetime.fromisoformat(result['publish_date'])
-                formatted += f" • {pub_date.strftime('%m-%d')}"
-            except:
-                pass
-        
-        # 如果是频道元信息，添加标识
-        if is_channel_metadata:
-            formatted += "\n   📋 频道信息"
+            # 使用 Markdown 超链接格式：[文字](链接)
+            formatted = f"{index}. {media_emoji} [{display_content}]({link_url})"
+        else:
+            # 没有链接时，只显示文字
+            formatted = f"{index}. {media_emoji} {display_content}"
         
         return formatted
     
