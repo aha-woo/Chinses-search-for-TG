@@ -940,10 +940,11 @@ class TelegramBot:
             response += f"找到 {total_count} 条结果\n"
             
             # 格式化每条结果（简洁格式：文字本身就是超链接，紧密排列）
-            for result in results:
+            for idx, result in enumerate(results, 1):
                 result_text = search_engine.format_search_result(
                     result,
-                    keywords=[query]
+                    keywords=[query],
+                    index=idx
                 )
                 response += result_text + "\n"
         

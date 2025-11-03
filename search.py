@@ -7,6 +7,7 @@ from datetime import datetime
 import re
 
 from database import db
+from config import config
 
 
 class SearchEngine:
@@ -158,8 +159,8 @@ class SearchEngine:
         
         return highlighted
     
-    def format_search_result(self, result: Dict, keywords: List[str] = None) -> str:
-        """格式化单个搜索结果（简洁格式：文字本身就是超链接）"""
+    def format_search_result(self, result: Dict, keywords: List[str] = None, index: int = 1) -> str:
+        """格式化单个搜索结果（文字本身就是超链接）"""
         content = result.get('content', '无标题')
         
         # 判断是否是频道元信息
@@ -168,12 +169,17 @@ class SearchEngine:
         # 如果是频道元信息，提取频道名称作为显示内容（不要用户名）
         if is_channel_metadata:
             # 内容格式：频道名称 用户名 分类:xxx 成员:xxx #标签
-            parts = content.split()
-            display_content = parts[0] if parts else content  # 只显示频道名称
+            channel_title = result.get('channel_title')
+            if channel_title:
+                display_content = channel_title
+            else:
+                parts = content.split()
+                display_content = parts[0] if parts else content  # 只显示频道名称
         else:
-            # 普通消息内容，限制长度
-            display_content = content
-            max_length = 100
+            # 普通消息内容，优先使用频道标题
+            channel_title = result.get('channel_title')
+            display_content = channel_title if channel_title else content
+            max_length = 120
             if len(display_content) > max_length:
                 display_content = display_content[:max_length] + "..."
         
@@ -191,27 +197,34 @@ class SearchEngine:
         
         # 构建超链接（如果有存储消息ID）
         storage_message_id = result.get('storage_message_id')
-        channel_username = result.get('channel_username', '')
+        channel_username = (result.get('channel_username') or '').lstrip('@')
+        message_id = result.get('message_id')
         
         # 构建链接URL
-        if storage_message_id:
-            # 使用存储频道的链接
-            from config import config
-            storage_channel_id = str(config.STORAGE_CHANNEL_ID).replace('-100', '')
-            link_url = f"https://t.me/c/{storage_channel_id}/{storage_message_id}"
-        elif channel_username and result.get('message_id'):
-            # 使用原始频道链接
-            link_url = f"https://t.me/{channel_username}/{result['message_id']}"
+        link_url = None
+        storage_channel_id = str(config.STORAGE_CHANNEL_ID).replace('-100', '')
+        is_private_identifier = channel_username.startswith('c_') if channel_username else False
+        
+        if is_channel_metadata:
+            if channel_username and not is_private_identifier:
+                link_url = f"https://t.me/{channel_username}"
+            elif storage_message_id:
+                link_url = f"https://t.me/c/{storage_channel_id}/{storage_message_id}"
         else:
-            link_url = None
+            if channel_username and not is_private_identifier and message_id:
+                link_url = f"https://t.me/{channel_username}/{message_id}"
+            elif channel_username and not is_private_identifier:
+                link_url = f"https://t.me/{channel_username}"
+            elif storage_message_id:
+                link_url = f"https://t.me/c/{storage_channel_id}/{storage_message_id}"
         
         # 格式化结果：文字本身就是超链接（Markdown 格式）
         if link_url:
             # 使用 Markdown 超链接格式：[文字](链接)
-            formatted = f"{media_emoji} [{display_content}]({link_url})"
+            formatted = f"{index}{media_emoji} [{display_content}]({link_url})"
         else:
             # 没有链接时，只显示文字
-            formatted = f"{media_emoji} {display_content}"
+            formatted = f"{index}{media_emoji} {display_content}"
         
         return formatted
     
