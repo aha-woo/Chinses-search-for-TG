@@ -157,14 +157,33 @@ class SearchEngine:
         """格式化单个搜索结果（优化版，带超链接）"""
         content = result.get('content', '无标题')
         
-        # 限制长度
-        max_length = 80
+        # 判断是否是频道元信息
+        is_channel_metadata = '#频道元信息' in content or '分类:' in content
+        
+        # 如果是频道元信息，提取频道名称（内容的第一部分）
+        if is_channel_metadata:
+            # 内容格式：频道名称 用户名 分类:xxx 成员:xxx #标签
+            parts = content.split()
+            channel_name = parts[0] if parts else content
+            # 限制长度，但保持可读性
+            max_length = 100
+        else:
+            # 普通消息内容
+            channel_name = None
+            max_length = 80
+        
+        # 限制显示长度
         if len(content) > max_length:
             content = content[:max_length] + "..."
         
         # 获取媒体类型emoji
         media_type = result.get('media_type', 'text')
-        media_emoji = self._get_media_emoji(media_type)
+        
+        # 如果是频道元信息，使用特殊图标
+        if is_channel_metadata:
+            media_emoji = "📺"  # 频道图标
+        else:
+            media_emoji = self._get_media_emoji(media_type)
         
         # 构建超链接（如果有存储消息ID）
         storage_message_id = result.get('storage_message_id')
@@ -182,13 +201,19 @@ class SearchEngine:
         else:
             link_url = None
         
-        # 格式化结果（纯文本模式，链接显示为URL）
-        if link_url:
-            # 使用纯文本，链接直接显示为 URL
-            formatted = f"{index}. {media_emoji} {content}\n   🔗 {link_url}"
+        # 格式化结果
+        if is_channel_metadata:
+            # 频道元信息格式
+            formatted = f"{index}. {media_emoji} {channel_name or content}"
+            if channel_username:
+                formatted += f" (@{channel_username})"
         else:
-            # 没有链接时，直接显示内容
+            # 普通消息格式
             formatted = f"{index}. {media_emoji} {content}"
+        
+        # 添加链接
+        if link_url:
+            formatted += f"\n   🔗 {link_url}"
         
         # 添加视频时长（如果是视频）
         if media_type == 'video' and result.get('video_duration'):
@@ -196,7 +221,7 @@ class SearchEngine:
             formatted += f" ⏱️ {duration}s"
         
         # 添加来源（简化显示）
-        if channel_username:
+        if channel_username and not is_channel_metadata:
             formatted += f"\n   📺 @{channel_username}"
         
         # 添加时间（简化显示）
@@ -206,6 +231,10 @@ class SearchEngine:
                 formatted += f" • {pub_date.strftime('%m-%d')}"
             except:
                 pass
+        
+        # 如果是频道元信息，添加标识
+        if is_channel_metadata:
+            formatted += "\n   📋 频道信息"
         
         return formatted
     

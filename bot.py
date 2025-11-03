@@ -863,12 +863,27 @@ class TelegramBot:
             channel_record = await db.get_channel_by_username(channel_username)
             if channel_record:
                 # 构建搜索内容（包含频道名称、分类等关键信息）
-                search_content = f"频道: {channel_title or channel_username}"
+                # 格式：频道名称在前（方便搜索），然后是详细信息
+                search_parts = []
+                
+                # 1. 频道名称（最重要的，放在前面）
+                if channel_title:
+                    search_parts.append(channel_title)
+                search_parts.append(channel_username)  # 用户名也可以搜索
+                
+                # 2. 添加详细信息（方便分类搜索）
                 if category:
-                    search_content += f" 分类: {category}"
+                    search_parts.append(f"分类:{category}")
                 if member_count:
-                    search_content += f" 成员: {member_count}"
-                search_content += f" #{category.replace(' ', '_')} #频道元信息"
+                    search_parts.append(f"成员:{member_count}")
+                
+                # 3. 标签（便于标签搜索）
+                if category:
+                    search_parts.append(f"#{category.replace(' ', '_')}")
+                search_parts.append("#频道元信息")
+                
+                # 组合成完整的搜索内容（用空格分隔，方便关键词搜索）
+                search_content = " ".join(search_parts)
                 
                 # 保存到 messages 表
                 await db.add_message(
