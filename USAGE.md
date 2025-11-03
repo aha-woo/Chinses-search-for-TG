@@ -65,6 +65,25 @@ t.me/c/1234567890
 /add_channel https://t.me/movie_share
 ```
 
+### 方式 3: 从文本文件批量导入频道
+
+如果已经在 VPS 项目目录下准备了一个 `uploaddata.md`，里面放着频道链接或 `@username`，可以运行脚本批量写入数据库：
+
+```bash
+cd ~/ChineseSearch
+python scripts/import_channels.py --file uploaddata.md
+```
+
+- 支持 `https://t.me/...` 和 `@username` 两种格式，自动去重并分类
+- 想先预览而不写入，可添加 `--dry-run`
+- 如果文件不在项目根目录，传入绝对路径即可
+
+示例：
+
+```bash
+python scripts/import_channels.py --file /path/to/other-file.md --dry-run
+```
+
 ### 自动分类
 
 Bot 会根据频道名称和描述自动分类：
