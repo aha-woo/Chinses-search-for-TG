@@ -83,14 +83,23 @@ def extract_channels_from_text(text: str) -> Dict[str, str]:
 def extract_title_from_context(context: str, username: str) -> str:
     if not context:
         return ""
+
     text = context
-    text = text.replace(f"@{username}", " ")
-    text = CHANNEL_PATTERN.sub(" ", text)
-    text = AT_PATTERN.sub(" ", text)
-    text = text.replace("频道", "频道 ")
-    text = text.replace("群组", "群组 ")
-    text = text.strip(" -\t|：: ")
-    return text.strip()
+    markers = []
+    for token in ("[", "http", f"@{username}"):
+        idx = text.find(token)
+        if idx != -1:
+            markers.append(idx)
+
+    if markers:
+        cut_at = min(markers)
+        text = text[:cut_at]
+
+    text = text.strip().strip('|').strip()
+    text = text.strip('*').strip()
+    text = text.strip('-').strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
 
 
 async def main() -> None:
