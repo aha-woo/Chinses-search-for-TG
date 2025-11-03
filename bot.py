@@ -917,12 +917,14 @@ class TelegramBot:
         
         # 1. 顶部广告位
         if config.SEARCH_AD_ENABLED and config.SEARCH_AD_TEXT:
-            response += f"📢 {config.SEARCH_AD_TEXT}\n"
+            ad_text = search_engine._escape_markdown(config.SEARCH_AD_TEXT)
+            response += f"📢 {ad_text}\n"
             response += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
         # 2. 搜索结果（参照截图格式：简洁清晰）
         if not results:
-            response += f"🔍 搜索: \"{query}\"\n\n"
+            query_text = search_engine._escape_markdown(query)
+            response += f"🔍 搜索: \"{query_text}\"\n\n"
             response += "😔 未找到相关内容\n\n"
             response += "💡 提示:\n"
             response += "• 尝试其他关键词\n"
@@ -935,18 +937,15 @@ class TelegramBot:
                 keywords=keywords,
                 media_type=media_filter
             )
-            response += f"找到 {total_count} 条结果\n\n"
+            response += f"找到 {total_count} 条结果\n"
             
             # 格式化每条结果（简洁格式：文字本身就是超链接，紧密排列）
-            for i, result in enumerate(results, 1):
-                # 计算实际索引（考虑分页）
-                actual_index = page * config.RESULTS_PER_PAGE + i
+            for result in results:
                 result_text = search_engine.format_search_result(
                     result,
-                    keywords=[query],
-                    index=actual_index
+                    keywords=[query]
                 )
-                response += result_text + "\n"  # 只换行，不空行
+                response += result_text + "\n"
         
         # 3. 类型分类按钮
         keyboard = []

@@ -158,7 +158,7 @@ class SearchEngine:
         
         return highlighted
     
-    def format_search_result(self, result: Dict, keywords: List[str] = None, index: int = 1) -> str:
+    def format_search_result(self, result: Dict, keywords: List[str] = None) -> str:
         """格式化单个搜索结果（简洁格式：文字本身就是超链接）"""
         content = result.get('content', '无标题')
         
@@ -208,10 +208,10 @@ class SearchEngine:
         # 格式化结果：文字本身就是超链接（Markdown 格式）
         if link_url:
             # 使用 Markdown 超链接格式：[文字](链接)
-            formatted = f"{index}. {media_emoji} [{display_content}]({link_url})"
+            formatted = f"{media_emoji} [{display_content}]({link_url})"
         else:
             # 没有链接时，只显示文字
-            formatted = f"{index}. {media_emoji} {display_content}"
+            formatted = f"{media_emoji} {display_content}"
         
         return formatted
     
