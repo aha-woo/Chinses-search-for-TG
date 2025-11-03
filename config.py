@@ -57,6 +57,12 @@ class Config:
     STORAGE_SEND_DELAY: float = float(os.getenv('STORAGE_SEND_DELAY', '2.0'))  # 发送到存储频道的延迟（秒）
     STORAGE_SEND_RANDOM_DELAY: float = float(os.getenv('STORAGE_SEND_RANDOM_DELAY', '0.5'))  # 随机延迟范围（秒）
     
+    # API 调用限制（防止触发 Telegram 速率限制）
+    API_DAILY_LIMIT: int = int(os.getenv('API_DAILY_LIMIT', '200'))  # 24 小时窗口内允许的 getChat 次数
+    API_BATCH_SIZE: int = int(os.getenv('API_BATCH_SIZE', '5'))  # 每批处理的频道数量
+    API_BATCH_COOLDOWN_MIN: int = int(os.getenv('API_BATCH_COOLDOWN_MIN', '300'))  # 批次之间等待的最小秒数（默认 5 分钟）
+    API_BATCH_COOLDOWN_MAX: int = int(os.getenv('API_BATCH_COOLDOWN_MAX', '900'))  # 批次之间等待的最大秒数（默认 15 分钟）
+    
     @classmethod
     def validate(cls) -> bool:
         """验证必要配置是否存在"""

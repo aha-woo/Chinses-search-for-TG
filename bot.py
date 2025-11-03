@@ -16,6 +16,7 @@ from telegram.ext import (
     filters
 )
 from telegram.constants import ParseMode
+from telegram.error import RetryAfter
 
 from config import config
 from database import db
@@ -23,6 +24,7 @@ from extractor import extractor
 from reports import report_generator
 from search import search_engine
 from moderation import SearchGroupModerator
+from rate_limiter import RollingWindowLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,10 @@ class TelegramBot:
         self.app: Optional[Application] = None
         self.is_running = False
         self.search_moderator = SearchGroupModerator()
+        self.api_rate_limiter = RollingWindowLimiter(
+            max_calls=config.API_DAILY_LIMIT,
+            window_seconds=24 * 60 * 60
+        )
     
     def create_app(self) -> Application:
         """创建 Application 实例"""
@@ -371,43 +377,48 @@ class TelegramBot:
             return
         
         # 收集所有链接（从文本和实体中）
-        all_links = []
-        
+        parsed_links = []
+
         # 1. 从纯文本中提取链接
         if message.text:
             text_channels = extractor.extract_from_text(message.text)
-            all_links.extend([ch.url for ch in text_channels])
+            if text_channels:
+                parsed_links.append((None, text_channels))
             logger.info(f"📝 从文本提取到 {len(text_channels)} 个链接")
-        
+
         # 2. 从 MessageEntity 中提取链接
         if message.entities:
+            entity_count = 0
             for entity in message.entities:
-                # TEXT_LINK: 链接隐藏在文字中
+                link_url = None
                 if entity.type == 'text_link' and entity.url:
-                    all_links.append(entity.url)
-                # URL: 纯文本URL（已经在上面提取过了，这里可以跳过）
+                    link_url = entity.url
                 elif entity.type == 'url' and message.text:
-                    url_text = message.text[entity.offset:entity.offset + entity.length]
-                    all_links.append(url_text)
-            
-            entity_count = len([e for e in message.entities if e.type in ['text_link', 'url']])
+                    link_url = message.text[entity.offset:entity.offset + entity.length]
+                if link_url:
+                    channels = extractor.extract_from_text(link_url)
+                    parsed_links.append((link_url, channels))
+                    entity_count += 1
             if entity_count > 0:
                 logger.info(f"🔗 从实体提取到 {entity_count} 个链接")
-        
-        if not all_links:
+
+        if not parsed_links:
             logger.debug(f"⚠️ 消息 {message.message_id} 中没有找到任何链接")
             return
         
-        logger.info(f"📊 总共收集到 {len(all_links)} 个链接")
+        total_channels = sum(len(channels) for _, channels in parsed_links)
+        logger.info(f"📊 总共收集到 {total_channels} 个频道候选")
         
         # 3. 处理所有链接（添加速率限制和验证）
         added_count = 0
         skipped_count = 0
+        processed_in_batch = 0
+        batch_size = max(1, config.API_BATCH_SIZE)
+        cooldown_min = max(0, config.API_BATCH_COOLDOWN_MIN)
+        cooldown_max = max(cooldown_min, config.API_BATCH_COOLDOWN_MAX)
+        processed_total = 0
         
-        for link in all_links:
-            # 使用 extractor 提取标准化的频道信息
-            channels = extractor.extract_from_text(link)
-            
+        for link_url, channels in parsed_links:
             for channel in channels:
                 # 跳过 Bot（username 以 'bot' 结尾的）
                 if channel.username.lower().endswith('bot'):
@@ -434,33 +445,46 @@ class TelegramBot:
                 
                 try:
                     # 添加延迟，避免触发速率限制
-                    # 基础延迟 + 随机延迟，让请求更自然
                     base_delay = config.CHANNEL_VERIFY_DELAY
                     random_delay = random.uniform(0, config.CHANNEL_VERIFY_RANDOM_DELAY)
                     total_delay = base_delay + random_delay
-                    
                     logger.debug(f"⏱️ 等待 {total_delay:.1f} 秒后验证 @{channel.username}")
                     await asyncio.sleep(total_delay)
-                    
-                    # 使用 Bot API 获取频道信息（验证是否存在）
-                    chat = await context.bot.get_chat(f"@{channel.username}")
-                    
-                    # 检查是否为频道或群组
+
+                    wait_time = await self.api_rate_limiter.throttle()
+                    if wait_time > 0:
+                        logger.info(f"🕒 达到 24 小时窗口限制，额外等待 {wait_time:.1f} 秒")
+
+                    while True:
+                        try:
+                            chat = await context.bot.get_chat(f"@{channel.username}")
+                            break
+                        except RetryAfter as retry_err:
+                            wait_for = max(1, int(getattr(retry_err, 'retry_after', 60)))
+                            logger.warning(f"⏳ Telegram 要求等待 {wait_for} 秒后再请求 @{channel.username}")
+                            await asyncio.sleep(wait_for)
+
                     if chat.type not in ['channel', 'supergroup', 'group']:
                         logger.warning(f"⏭️ 跳过非频道/群组: @{channel.username} (类型: {chat.type})")
                         skipped_count += 1
                         continue
-                    
+
                     channel_title = chat.title
                     channel_id_str = str(chat.id)
                     channel_exists = True
-                    
-                    # 尝试获取成员数（可能需要权限）
+
+                    # 获取成员数
                     try:
+                        wait_time = await self.api_rate_limiter.throttle()
+                        if wait_time > 0:
+                            logger.info(f"🕒 成员数查询触发限速，额外等待 {wait_time:.1f} 秒")
                         member_count = await context.bot.get_chat_member_count(chat.id)
-                    except:
+                    except RetryAfter as retry_err:
+                        wait_for = max(1, int(getattr(retry_err, 'retry_after', 60)))
+                        logger.warning(f"⏳ 成员数查询被限速，等待 {wait_for} 秒后跳过成员数抓取")
+                    except Exception:
                         pass
-                    
+
                     logger.info(f"📋 获取频道信息: {channel_title} (@{channel.username})")
                     
                 except Exception as e:
@@ -516,6 +540,19 @@ class TelegramBot:
                         except Exception as e:
                             logger.warning(f"⚠️ 无法发送频道元信息到存储频道: {e}")
         
+                processed_total += 1
+
+                # 分批控制：达到批量上限后休眠一段随机时间
+                remaining = total_channels - processed_total
+                if remaining > 0:
+                    processed_in_batch += 1
+                    if processed_in_batch >= batch_size:
+                        cooldown = random.uniform(cooldown_min, cooldown_max)
+                        if cooldown > 0:
+                            logger.info(f"⏳ 达到批次上限 {batch_size} 个，休眠 {cooldown:.1f} 秒后继续")
+                            await asyncio.sleep(cooldown)
+                        processed_in_batch = 0
+
         # 输出统计信息
         if added_count > 0 or skipped_count > 0:
             summary = f"📺 消息 {message.message_id} 处理完成："
