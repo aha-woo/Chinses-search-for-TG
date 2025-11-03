@@ -74,7 +74,7 @@ cd ~/ChineseSearch
 python scripts/import_channels.py --file uploaddata.md
 ```
 
-- 支持 `https://t.me/...` 和 `@username` 两种格式，自动去重并分类
+- 支持 `https://t.me/...` 和 `@username` 两种格式，自动去重、提取标题并分类
 - 想先预览而不写入，可添加 `--dry-run`
 - 如果文件不在项目根目录，传入绝对路径即可
 

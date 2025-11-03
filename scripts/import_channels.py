@@ -30,6 +30,7 @@ async def insert_channels(channels: Dict[str, str], source: str, dry_run: bool) 
 
     for username, context in sorted(channels.items()):
         username = username.lower()
+        title = extract_title_from_context(context, username)
 
         existing = await db.get_channel_by_username(username)
         if existing:
@@ -40,19 +41,21 @@ async def insert_channels(channels: Dict[str, str], source: str, dry_run: bool) 
         category = extractor.categorize_channel(context or "") or "uncategorized"
 
         if dry_run:
-            print(f"[DRY-RUN] 将插入频道: @{username} (分类: {category})")
+            display_title = f" 标题: {title}" if title else ""
+            print(f"[DRY-RUN] 将插入频道: @{username}{display_title} (分类: {category})")
             added += 1
             continue
 
         await db.add_channel(
             username=username,
-            title=None,
+            title=title,
             channel_id=None,
             discovered_from=source,
             category=category
         )
         added += 1
-        print(f"✅ 已插入频道: @{username} (分类: {category})")
+        display_title = f" 标题: {title}" if title else ""
+        print(f"✅ 已插入频道: @{username}{display_title} (分类: {category})")
 
     print("""
 ======== 汇总 ========
@@ -75,6 +78,19 @@ def extract_channels_from_text(text: str) -> Dict[str, str]:
             channels.setdefault(username, line.strip())
 
     return channels
+
+
+def extract_title_from_context(context: str, username: str) -> str:
+    if not context:
+        return ""
+    text = context
+    text = text.replace(f"@{username}", " ")
+    text = CHANNEL_PATTERN.sub(" ", text)
+    text = AT_PATTERN.sub(" ", text)
+    text = text.replace("频道", "频道 ")
+    text = text.replace("群组", "群组 ")
+    text = text.strip(" -\t|：: ")
+    return text.strip()
 
 
 async def main() -> None:
