@@ -22,6 +22,7 @@ from database import db
 from extractor import extractor
 from reports import report_generator
 from search import search_engine
+from moderation import SearchGroupModerator
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class TelegramBot:
     def __init__(self):
         self.app: Optional[Application] = None
         self.is_running = False
+        self.search_moderator = SearchGroupModerator()
     
     def create_app(self) -> Application:
         """创建 Application 实例"""
@@ -230,36 +232,18 @@ class TelegramBot:
         query = ' '.join(context.args)
         
         # 执行搜索
-        results, total_pages = await search_engine.search(query, page=0)
+        results, total_pages, total_count = await search_engine.search(query, page=0)
         
-        if not results:
-            await update.message.reply_text(f"😔 未找到包含 \"{query}\" 的内容")
-            return
-        
-        # 格式化结果
-        response = f"🔍 搜索: \"{query}\"\n"
-        response += f"━━━━━━━━━━━━━━━━━━━━\n"
-        response += f"找到 {len(results)} 条结果\n\n"
-        
-        for i, result in enumerate(results[:5], 1):  # 只显示前5条
-            response += f"{i}. {result['content'][:80]}...\n"
-            if result.get('channel_username'):
-                response += f"   📺 @{result['channel_username']}\n"
-            response += "\n"
-        
-        # 添加翻页按钮
-        keyboard = []
-        if total_pages > 1:
-            keyboard.append([
-                InlineKeyboardButton(
-                    "下一页 ▶️",
-                    callback_data=f'search_{query}_1'
-                )
-            ])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-        
-        await update.message.reply_text(response, reply_markup=reply_markup)
+        await self._send_search_results(
+            message=update.message,
+            query=query,
+            results=results,
+            page=0,
+            total_pages=total_pages,
+            total_count=total_count,
+            media_filter=None,
+            edit=False
+        )
     
     async def cmd_crawler_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理 /crawler_status 命令"""
@@ -550,6 +534,15 @@ class TelegramBot:
         if not message or not message.text:
             return
         
+        user = update.effective_user
+        is_admin_user = config.is_admin(user.id) if user else False
+        allowed = await self.search_moderator.ensure_allowed(
+            message,
+            is_admin=is_admin_user
+        )
+        if not allowed:
+            return
+        
         query = message.text.strip()
         
         if not query or len(query) < 2:
@@ -559,7 +552,7 @@ class TelegramBot:
         
         # 执行搜索
         try:
-            results, total_pages = await search_engine.search(query, page=0)
+            results, total_pages, total_count = await search_engine.search(query, page=0)
             
             # 格式化并发送结果
             await self._send_search_results(
@@ -568,6 +561,7 @@ class TelegramBot:
                 results=results,
                 page=0,
                 total_pages=total_pages,
+                total_count=total_count,
                 media_filter=None
             )
         except Exception as e:
@@ -696,7 +690,7 @@ class TelegramBot:
                 
                 # 执行搜索（带类型过滤）
                 media_filter = None if media_type == 'all' else media_type
-                results, total_pages = await search_engine.search(
+                results, total_pages, total_count = await search_engine.search(
                     query_text,
                     page=page,
                     media_type_filter=media_filter
@@ -709,6 +703,7 @@ class TelegramBot:
                     results=results,
                     page=page,
                     total_pages=total_pages,
+                    total_count=total_count,
                     media_filter=media_filter,
                     edit=True
                 )
@@ -723,7 +718,7 @@ class TelegramBot:
                 
                 # 执行搜索
                 media_filter = None if media_type == 'all' else media_type
-                results, total_pages = await search_engine.search(
+                results, total_pages, total_count = await search_engine.search(
                     query_text,
                     page=page,
                     media_type_filter=media_filter
@@ -736,6 +731,7 @@ class TelegramBot:
                     results=results,
                     page=page,
                     total_pages=total_pages,
+                    total_count=total_count,
                     media_filter=media_filter,
                     edit=True
                 )
@@ -907,6 +903,7 @@ class TelegramBot:
         results: List[Dict],
         page: int = 0,
         total_pages: int = 1,
+        total_count: int = None,
         media_filter: str = None,
         edit: bool = False
     ):
@@ -932,19 +929,21 @@ class TelegramBot:
             response += "• 使用更通用的词语"
         else:
             # 显示总数（简洁格式，参照截图）
-            keywords, _ = search_engine._parse_query(query)
-            total_count = await db.search_messages_count(
-                keywords=keywords,
-                media_type=media_filter
-            )
+            if total_count is None:
+                keywords, _ = search_engine._parse_query(query)
+                total_count = await db.search_messages_count(
+                    keywords=keywords,
+                    media_type=media_filter
+                )
             response += f"找到 {total_count} 条结果\n"
             
             # 格式化每条结果（简洁格式：文字本身就是超链接，紧密排列）
             for idx, result in enumerate(results, 1):
+                actual_index = page * config.RESULTS_PER_PAGE + idx
                 result_text = search_engine.format_search_result(
                     result,
                     keywords=[query],
-                    index=idx
+                    index=actual_index
                 )
                 response += result_text + "\n"
         

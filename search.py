@@ -76,7 +76,7 @@ class SearchEngine:
             offset=offset
         )
         
-        return results, total_pages
+        return results, total_pages, total_count
     
     def _parse_query(self, query: str) -> Tuple[List[str], Dict[str, str]]:
         """
@@ -176,9 +176,8 @@ class SearchEngine:
                 parts = content.split()
                 display_content = parts[0] if parts else content  # 只显示频道名称
         else:
-            # 普通消息内容，优先使用频道标题
-            channel_title = result.get('channel_title')
-            display_content = channel_title if channel_title else content
+            # 普通消息内容直接使用文本内容（截断即可）
+            display_content = content
             max_length = 120
             if len(display_content) > max_length:
                 display_content = display_content[:max_length] + "..."
