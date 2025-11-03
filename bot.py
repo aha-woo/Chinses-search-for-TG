@@ -964,26 +964,32 @@ class TelegramBot:
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # 发送消息
+        # 发送消息（不使用 Markdown，避免解析错误）
+        # 如果内容中包含特殊字符，Markdown 格式容易出错
+        # 改用纯文本模式，确保稳定可靠
         try:
             if edit and hasattr(message, 'edit_text'):
                 await message.edit_text(
                     response,
                     reply_markup=reply_markup,
-                    parse_mode=ParseMode.MARKDOWN,
                     disable_web_page_preview=True
                 )
             else:
                 await message.reply_text(
                     response,
                     reply_markup=reply_markup,
-                    parse_mode=ParseMode.MARKDOWN,
                     disable_web_page_preview=True
                 )
         except Exception as e:
-            logger.error(f"发送搜索结果失败: {e}")
-            # 如果Markdown解析失败，尝试不带格式发送
-            await message.reply_text(response, reply_markup=reply_markup)
+            logger.error(f"发送搜索结果失败: {e}", exc_info=True)
+            # 如果还是失败，尝试最简单的纯文本（没有按钮）
+            try:
+                if edit and hasattr(message, 'edit_text'):
+                    await message.edit_text(response)
+                else:
+                    await message.reply_text(response)
+            except Exception as e2:
+                logger.error(f"发送搜索结果完全失败: {e2}", exc_info=True)
     
     def _get_media_type_name(self, media_type: str) -> str:
         """获取媒体类型的中文名称"""

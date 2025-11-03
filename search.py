@@ -162,9 +162,6 @@ class SearchEngine:
         if len(content) > max_length:
             content = content[:max_length] + "..."
         
-        # 转义 Markdown 特殊字符
-        content = self._escape_markdown(content)
-        
         # 获取媒体类型emoji
         media_type = result.get('media_type', 'text')
         media_emoji = self._get_media_emoji(media_type)
@@ -185,11 +182,12 @@ class SearchEngine:
         else:
             link_url = None
         
-        # 格式化结果（带超链接）
+        # 格式化结果（纯文本模式，链接显示为URL）
         if link_url:
-            # Telegram Markdown格式超链接
-            formatted = f"{index}. {media_emoji} [{content}]({link_url})"
+            # 使用纯文本，链接直接显示为 URL
+            formatted = f"{index}. {media_emoji} {content}\n   🔗 {link_url}"
         else:
+            # 没有链接时，直接显示内容
             formatted = f"{index}. {media_emoji} {content}"
         
         # 添加视频时长（如果是视频）
@@ -212,12 +210,31 @@ class SearchEngine:
         return formatted
     
     def _escape_markdown(self, text: str) -> str:
-        """转义 Markdown 特殊字符"""
+        """转义 Markdown 特殊字符（用于普通文本）"""
         if not text:
             return text
         
-        # Telegram Markdown 特殊字符
+        # Telegram Markdown 特殊字符（所有字符）
         special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        
+        return text
+    
+    def _escape_markdown_for_link(self, text: str) -> str:
+        """转义 Markdown 特殊字符（用于链接文本）
+        
+        在 [text](url) 格式中，text 部分不能包含 [ 和 ]，否则会破坏链接格式
+        其他字符也需要转义，但 (, ) 在 URL 部分，不影响链接文本
+        """
+        if not text:
+            return text
+        
+        # 链接文本中最危险的字符：[ ] 会破坏链接格式
+        # 其他字符也需要转义以保持格式安全
+        # 但不需要转义 ( ) 因为这些在 URL 部分
+        special_chars = ['_', '*', '[', ']', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
         
         for char in special_chars:
             text = text.replace(char, f'\\{char}')
