@@ -23,9 +23,9 @@ class SearchEngine:
         channel_filter: str = None,
         media_type_filter: str = None,
         date_filter: str = None
-    ) -> Tuple[List[Dict], int]:
+    ) -> Tuple[List[Dict], int, int]:
         """
-        执行搜索
+        执行搜索（联合搜索channels和messages表）
         
         Args:
             query: 搜索关键词
@@ -35,7 +35,7 @@ class SearchEngine:
             date_filter: 日期过滤（YYYY-MM-DD）
         
         Returns:
-            (搜索结果列表, 总页数)
+            (搜索结果列表, 总页数, 总数量)
         """
         # 解析查询字符串
         keywords, filters = self._parse_query(query)
@@ -48,33 +48,103 @@ class SearchEngine:
         if date_filter:
             filters['date'] = date_filter
         
-        # 获取频道ID（如果指定了频道过滤）
-        channel_id = None
+        # 如果指定了频道过滤，只搜索该频道
         if filters.get('channel'):
             username = filters['channel'].lstrip('@')
             channel = await db.get_channel_by_username(username)
             if channel:
                 channel_id = channel['id']
+                # 只搜索该频道的消息
+                total_count = await db.search_messages_count(
+                    keywords=keywords,
+                    channel_id=channel_id,
+                    media_type=filters.get('media_type')
+                )
+                total_pages = max(1, (total_count + self.results_per_page - 1) // self.results_per_page)
+                offset = page * self.results_per_page
+                results = await db.search_messages(
+                    keywords=keywords,
+                    channel_id=channel_id,
+                    media_type=filters.get('media_type'),
+                    limit=self.results_per_page,
+                    offset=offset
+                )
+                return results, total_pages, total_count
         
-        # 先计算总数（用于分页）
-        total_count = await db.search_messages_count(
-            keywords=keywords,
-            channel_id=channel_id,
-            media_type=filters.get('media_type')
-        )
+        # 联合搜索：同时搜索channels和messages表
+        # 使用关键词列表（OR逻辑）
+        search_keywords = keywords if keywords else [query]
+        
+        # 获取总数
+        counts = await db.search_all_count(keywords=search_keywords)
+        total_count = counts['total']
         
         # 计算总页数
         total_pages = max(1, (total_count + self.results_per_page - 1) // self.results_per_page)
         
-        # 执行搜索（只获取当前页的数据）
-        offset = page * self.results_per_page
-        results = await db.search_messages(
-            keywords=keywords,
-            channel_id=channel_id,
-            media_type=filters.get('media_type'),
-            limit=self.results_per_page,
-            offset=offset
+        # 执行联合搜索
+        # 为了分页，我们需要获取足够多的结果，然后手动分页
+        # 因为channels和messages是分开查询的，我们需要合并后再分页
+        all_results = await db.search_all(
+            keywords=search_keywords,
+            limit=1000,  # 获取足够多的结果用于分页
+            offset=0
         )
+        
+        # 将channels转换为类似messages的格式
+        formatted_channels = []
+        for channel in all_results['channels']:
+            # 构建频道元信息格式的content
+            channel_content_parts = []
+            if channel.get('channel_title'):
+                channel_content_parts.append(channel['channel_title'])
+            if channel.get('channel_username'):
+                channel_content_parts.append(channel['channel_username'])
+            if channel.get('category'):
+                channel_content_parts.append(f"分类:{channel['category']}")
+            if channel.get('member_count'):
+                channel_content_parts.append(f"成员:{channel['member_count']}")
+            channel_content_parts.append("#资源分享#频道元信息")
+            
+            channel_dict = {
+                'id': channel.get('id'),
+                'channel_id': channel.get('id'),
+                'message_id': None,
+                'storage_message_id': None,
+                'content': ' '.join(channel_content_parts),
+                'media_type': 'channel',
+                'media_url': None,
+                'author': None,
+                'publish_date': channel.get('discovered_date'),
+                'collected_date': channel.get('discovered_date'),
+                'channel_username': channel.get('channel_username'),
+                'channel_title': channel.get('channel_title'),
+                'is_channel': True  # 标识这是频道结果
+            }
+            formatted_channels.append(channel_dict)
+        
+        # 合并channels和messages结果
+        all_combined = formatted_channels + all_results['messages']
+        
+        # 按时间排序（最新的在前）
+        all_combined.sort(
+            key=lambda x: x.get('collected_date') or x.get('publish_date') or '',
+            reverse=True
+        )
+        
+        # 应用媒体类型过滤（如果有）
+        if filters.get('media_type'):
+            all_combined = [
+                r for r in all_combined 
+                if r.get('media_type') == filters.get('media_type')
+            ]
+            # 重新计算总数和页数
+            total_count = len(all_combined)
+            total_pages = max(1, (total_count + self.results_per_page - 1) // self.results_per_page)
+        
+        # 手动分页
+        offset = page * self.results_per_page
+        results = all_combined[offset:offset + self.results_per_page]
         
         return results, total_pages, total_count
     

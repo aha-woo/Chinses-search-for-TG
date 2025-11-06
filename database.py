@@ -372,7 +372,8 @@ class Database:
     
     async def search_all(
         self,
-        keyword: str,
+        keyword: str = None,
+        keywords: List[str] = None,
         limit: int = 50,
         offset: int = 0
     ) -> Dict[str, List[Dict]]:
@@ -381,7 +382,8 @@ class Database:
         返回包含channels和messages两个列表的字典
         
         Args:
-            keyword: 搜索关键词
+            keyword: 单个搜索关键词（向后兼容）
+            keywords: 多个搜索关键词列表（OR逻辑）
             limit: 每个表返回的最大结果数
             offset: 偏移量
             
@@ -391,50 +393,76 @@ class Database:
                 'messages': [...]   # 匹配的消息列表
             }
         """
-        if not keyword:
+        # 支持单个关键词或关键词列表
+        if keywords:
+            keyword_list = keywords
+        elif keyword:
+            keyword_list = [keyword]
+        else:
             return {'channels': [], 'messages': []}
         
-        keyword_pattern = f"%{keyword}%"
+        if not keyword_list:
+            return {'channels': [], 'messages': []}
+        
         results = {'channels': [], 'messages': []}
         
         async with self.get_connection() as conn:
+            # 构建关键词搜索条件（OR逻辑）
+            channel_conditions = []
+            message_conditions = []
+            channel_params = []
+            message_params = []
+            
+            for kw in keyword_list:
+                keyword_pattern = f"%{kw}%"
+                # 频道表的搜索条件（每个关键词需要3个参数）
+                channel_conditions.append(
+                    "(channel_username LIKE ? OR channel_title LIKE ? OR notes LIKE ?)"
+                )
+                channel_params.extend([keyword_pattern, keyword_pattern, keyword_pattern])
+                # 消息表的搜索条件（每个关键词需要1个参数）
+                message_conditions.append("m.content LIKE ?")
+                message_params.append(keyword_pattern)
+            
             # 搜索频道表：在channel_username, channel_title, notes中搜索
-            channel_query = """
+            channel_query = f"""
                 SELECT * FROM channels
-                WHERE channel_username LIKE ? 
-                   OR channel_title LIKE ?
-                   OR notes LIKE ?
+                WHERE ({' OR '.join(channel_conditions)})
                 ORDER BY discovered_date DESC
                 LIMIT ? OFFSET ?
             """
-            cursor = await conn.execute(
-                channel_query, 
-                (keyword_pattern, keyword_pattern, keyword_pattern, limit, offset)
-            )
+            channel_params_with_limit = channel_params + [limit, offset]
+            cursor = await conn.execute(channel_query, channel_params_with_limit)
             channel_rows = await cursor.fetchall()
             results['channels'] = [dict(row) for row in channel_rows]
             
             # 搜索消息表：在content中搜索
-            message_query = """
+            message_query = f"""
                 SELECT m.*, c.channel_username, c.channel_title 
                 FROM messages m
                 LEFT JOIN channels c ON m.channel_id = c.id
-                WHERE m.content LIKE ?
+                WHERE ({' OR '.join(message_conditions)})
                 ORDER BY m.collected_date DESC
                 LIMIT ? OFFSET ?
             """
-            cursor = await conn.execute(
-                message_query,
-                (keyword_pattern, limit, offset)
-            )
+            message_params_with_limit = message_params + [limit, offset]
+            cursor = await conn.execute(message_query, message_params_with_limit)
             message_rows = await cursor.fetchall()
             results['messages'] = [dict(row) for row in message_rows]
         
         return results
     
-    async def search_all_count(self, keyword: str) -> Dict[str, int]:
+    async def search_all_count(
+        self, 
+        keyword: str = None, 
+        keywords: List[str] = None
+    ) -> Dict[str, int]:
         """
         获取联合搜索的总数
+        
+        Args:
+            keyword: 单个搜索关键词（向后兼容）
+            keywords: 多个搜索关键词列表（OR逻辑）
         
         Returns:
             {
@@ -443,33 +471,52 @@ class Database:
                 'total': 总匹配数量
             }
         """
-        if not keyword:
+        # 支持单个关键词或关键词列表
+        if keywords:
+            keyword_list = keywords
+        elif keyword:
+            keyword_list = [keyword]
+        else:
             return {'channels': 0, 'messages': 0, 'total': 0}
         
-        keyword_pattern = f"%{keyword}%"
+        if not keyword_list:
+            return {'channels': 0, 'messages': 0, 'total': 0}
+        
         counts = {'channels': 0, 'messages': 0, 'total': 0}
         
         async with self.get_connection() as conn:
+            # 构建关键词搜索条件（OR逻辑）
+            channel_conditions = []
+            message_conditions = []
+            channel_params = []
+            message_params = []
+            
+            for kw in keyword_list:
+                keyword_pattern = f"%{kw}%"
+                # 频道表的搜索条件（每个关键词需要3个参数）
+                channel_conditions.append(
+                    "(channel_username LIKE ? OR channel_title LIKE ? OR notes LIKE ?)"
+                )
+                channel_params.extend([keyword_pattern, keyword_pattern, keyword_pattern])
+                # 消息表的搜索条件（每个关键词需要1个参数）
+                message_conditions.append("content LIKE ?")
+                message_params.append(keyword_pattern)
+            
             # 统计频道匹配数
-            channel_query = """
+            channel_query = f"""
                 SELECT COUNT(*) as count FROM channels
-                WHERE channel_username LIKE ? 
-                   OR channel_title LIKE ?
-                   OR notes LIKE ?
+                WHERE ({' OR '.join(channel_conditions)})
             """
-            cursor = await conn.execute(
-                channel_query,
-                (keyword_pattern, keyword_pattern, keyword_pattern)
-            )
+            cursor = await conn.execute(channel_query, channel_params)
             row = await cursor.fetchone()
             counts['channels'] = row['count'] if row else 0
             
             # 统计消息匹配数
-            message_query = """
+            message_query = f"""
                 SELECT COUNT(*) as count FROM messages
-                WHERE content LIKE ?
+                WHERE ({' OR '.join(message_conditions)})
             """
-            cursor = await conn.execute(message_query, (keyword_pattern,))
+            cursor = await conn.execute(message_query, message_params)
             row = await cursor.fetchone()
             counts['messages'] = row['count'] if row else 0
             
