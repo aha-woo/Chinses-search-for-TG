@@ -368,6 +368,115 @@ class Database:
             rows = await cursor.fetchall()
             return {row['media_type']: row['count'] for row in rows}
     
+    # ============ 联合搜索 ============
+    
+    async def search_all(
+        self,
+        keyword: str,
+        limit: int = 50,
+        offset: int = 0
+    ) -> Dict[str, List[Dict]]:
+        """
+        联合搜索：同时在channels和messages表中搜索关键词
+        返回包含channels和messages两个列表的字典
+        
+        Args:
+            keyword: 搜索关键词
+            limit: 每个表返回的最大结果数
+            offset: 偏移量
+            
+        Returns:
+            {
+                'channels': [...],  # 匹配的频道列表
+                'messages': [...]   # 匹配的消息列表
+            }
+        """
+        if not keyword:
+            return {'channels': [], 'messages': []}
+        
+        keyword_pattern = f"%{keyword}%"
+        results = {'channels': [], 'messages': []}
+        
+        async with self.get_connection() as conn:
+            # 搜索频道表：在channel_username, channel_title, notes中搜索
+            channel_query = """
+                SELECT * FROM channels
+                WHERE channel_username LIKE ? 
+                   OR channel_title LIKE ?
+                   OR notes LIKE ?
+                ORDER BY discovered_date DESC
+                LIMIT ? OFFSET ?
+            """
+            cursor = await conn.execute(
+                channel_query, 
+                (keyword_pattern, keyword_pattern, keyword_pattern, limit, offset)
+            )
+            channel_rows = await cursor.fetchall()
+            results['channels'] = [dict(row) for row in channel_rows]
+            
+            # 搜索消息表：在content中搜索
+            message_query = """
+                SELECT m.*, c.channel_username, c.channel_title 
+                FROM messages m
+                LEFT JOIN channels c ON m.channel_id = c.id
+                WHERE m.content LIKE ?
+                ORDER BY m.collected_date DESC
+                LIMIT ? OFFSET ?
+            """
+            cursor = await conn.execute(
+                message_query,
+                (keyword_pattern, limit, offset)
+            )
+            message_rows = await cursor.fetchall()
+            results['messages'] = [dict(row) for row in message_rows]
+        
+        return results
+    
+    async def search_all_count(self, keyword: str) -> Dict[str, int]:
+        """
+        获取联合搜索的总数
+        
+        Returns:
+            {
+                'channels': 频道匹配数量,
+                'messages': 消息匹配数量,
+                'total': 总匹配数量
+            }
+        """
+        if not keyword:
+            return {'channels': 0, 'messages': 0, 'total': 0}
+        
+        keyword_pattern = f"%{keyword}%"
+        counts = {'channels': 0, 'messages': 0, 'total': 0}
+        
+        async with self.get_connection() as conn:
+            # 统计频道匹配数
+            channel_query = """
+                SELECT COUNT(*) as count FROM channels
+                WHERE channel_username LIKE ? 
+                   OR channel_title LIKE ?
+                   OR notes LIKE ?
+            """
+            cursor = await conn.execute(
+                channel_query,
+                (keyword_pattern, keyword_pattern, keyword_pattern)
+            )
+            row = await cursor.fetchone()
+            counts['channels'] = row['count'] if row else 0
+            
+            # 统计消息匹配数
+            message_query = """
+                SELECT COUNT(*) as count FROM messages
+                WHERE content LIKE ?
+            """
+            cursor = await conn.execute(message_query, (keyword_pattern,))
+            row = await cursor.fetchone()
+            counts['messages'] = row['count'] if row else 0
+            
+            counts['total'] = counts['channels'] + counts['messages']
+        
+        return counts
+    
     # ============ 配置操作 ============
     
     async def set_config(self, key: str, value: str):
