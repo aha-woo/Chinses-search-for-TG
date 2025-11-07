@@ -19,7 +19,7 @@ from telegram.ext import (
     filters
 )
 from telegram.constants import ParseMode
-from telegram.error import RetryAfter
+from telegram.error import RetryAfter, BadRequest
 
 from config import config
 from database import db
@@ -1324,6 +1324,14 @@ class TelegramBot:
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True
                 )
+        except BadRequest as e:
+            # 如果是"消息未修改"错误，忽略（这是正常的，说明内容相同）
+            if "Message is not modified" in str(e):
+                logger.debug(f"消息未修改，忽略: {e}")
+                return
+            # 其他BadRequest错误（如HTML解析错误），继续处理
+            logger.error(f"发送搜索结果失败 (HTML BadRequest): {e}", exc_info=True)
+            raise  # 重新抛出，让后续的错误处理逻辑处理
         except Exception as e:
             logger.error(f"发送搜索结果失败 (HTML): {e}", exc_info=True)
             # 如果 HTML 解析失败，尝试修复HTML格式后重试
