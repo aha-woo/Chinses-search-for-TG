@@ -93,6 +93,9 @@ class TelegramBot:
         # 初始化数据库
         await db.init_database()
         
+        # 检查并恢复未完成的消息处理（断点续传）
+        await self._resume_incomplete_processing()
+        
         # 启动轮询
         await self.app.initialize()
         await self.app.start()
@@ -110,6 +113,44 @@ class TelegramBot:
             await self.app.shutdown()
         
         logger.info("⏹️ Bot 已停止")
+    
+    async def _resume_incomplete_processing(self):
+        """恢复未完成的消息处理（断点续传）"""
+        try:
+            incomplete_messages = await db.get_incomplete_messages()
+            if not incomplete_messages:
+                logger.info("ℹ️ 没有未完成的消息处理")
+                return
+            
+            logger.info(f"🔄 发现 {len(incomplete_messages)} 个未完成的消息，开始恢复处理...")
+            
+            for msg_status in incomplete_messages:
+                message_id = msg_status['message_id']
+                channel_list_str = msg_status.get('channel_list', '')
+                processed_channels = await db.get_processed_channels(message_id)
+                
+                if not channel_list_str:
+                    logger.warning(f"⚠️ 消息 {message_id} 没有保存频道列表，无法恢复处理")
+                    continue
+                
+                # 解析频道列表
+                channel_usernames = [ch.strip() for ch in channel_list_str.split(',') if ch.strip()]
+                total_channels = len(channel_usernames)
+                processed_count = len(processed_channels)
+                remaining_count = total_channels - processed_count
+                
+                if remaining_count <= 0:
+                    # 所有频道都已处理，标记为完成
+                    await db.complete_message_processing(message_id)
+                    logger.info(f"✅ 消息 {message_id} 所有频道已处理，标记为完成")
+                    continue
+                
+                logger.info(f"📋 恢复处理消息 {message_id}: 已处理 {processed_count}/{total_channels} 个频道，剩余 {remaining_count} 个")
+                logger.warning(f"⚠️ 注意：消息 {message_id} 需要重新发送才能继续处理（Telegram不会自动重新发送已处理的消息）")
+                logger.warning(f"   建议：请重新发送包含这些频道的消息，系统会自动从断点继续处理")
+                
+        except Exception as e:
+            logger.error(f"❌ 恢复未完成消息处理失败: {e}", exc_info=True)
     
     # ============ 命令处理器 ============
     
@@ -417,6 +458,12 @@ class TelegramBot:
         processing_status = await db.get_message_processing_status(message_id_str)
         processed_channels_set = set()
         
+        # 保存消息文本和频道列表（用于断点续传）
+        message_text = message.text or ''
+        # 将频道列表序列化为字符串（格式：username1,username2,username3）
+        channel_usernames = [ch.username for _, channels in parsed_links for ch in channels]
+        channel_list_str = ','.join(channel_usernames)
+        
         if processing_status:
             if processing_status['status'] == 'completed':
                 logger.info(f"ℹ️ 消息 {message_id_str} 已处理完成，跳过")
@@ -425,9 +472,11 @@ class TelegramBot:
                 # 获取已处理的频道列表
                 processed_channels_set = await db.get_processed_channels(message_id_str)
                 logger.info(f"🔄 检测到未完成的处理进度，已处理 {len(processed_channels_set)} 个频道，从断点继续...")
+                # 更新消息文本和频道列表（以防消息内容有变化）
+                await db.update_message_processing_info(message_id_str, message_text, channel_list_str)
         else:
-            # 初始化处理进度
-            await db.init_message_processing(message_id_str, total_channels)
+            # 初始化处理进度（保存消息文本和频道列表）
+            await db.init_message_processing(message_id_str, total_channels, message_text, channel_list_str)
             logger.info(f"📝 初始化消息处理进度: {message_id_str} (共 {total_channels} 个频道)")
         
         # 3. 处理所有链接（添加速率限制和验证）

@@ -115,9 +115,26 @@ class Database:
                     status TEXT DEFAULT 'processing',
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    message_text TEXT,
+                    channel_list TEXT
                 )
             """)
+            
+            # 数据库迁移：为现有表添加新字段（如果不存在）
+            try:
+                cursor = await conn.execute("PRAGMA table_info(message_processing_status)")
+                columns = [row[1] for row in await cursor.fetchall()]
+                
+                if 'message_text' not in columns:
+                    await conn.execute("ALTER TABLE message_processing_status ADD COLUMN message_text TEXT")
+                    logger.info("✅ 已添加 message_text 字段")
+                
+                if 'channel_list' not in columns:
+                    await conn.execute("ALTER TABLE message_processing_status ADD COLUMN channel_list TEXT")
+                    logger.info("✅ 已添加 channel_list 字段")
+            except Exception as e:
+                logger.warning(f"⚠️ 数据库迁移可能失败（字段可能已存在）: {e}")
             
             # 创建索引
             await conn.execute("""
@@ -606,14 +623,20 @@ class Database:
             row = await cursor.fetchone()
             return dict(row) if row else None
     
-    async def init_message_processing(self, message_id: str, total_channels: int):
+    async def init_message_processing(
+        self, 
+        message_id: str, 
+        total_channels: int,
+        message_text: str = None,
+        channel_list: str = None
+    ):
         """初始化消息处理状态"""
         async with self.get_connection() as conn:
             await conn.execute("""
                 INSERT OR REPLACE INTO message_processing_status 
-                (message_id, total_channels, processed_channels, status, started_at, updated_at)
-                VALUES (?, ?, '', 'processing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, (message_id, total_channels))
+                (message_id, total_channels, processed_channels, status, started_at, updated_at, message_text, channel_list)
+                VALUES (?, ?, '', 'processing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)
+            """, (message_id, total_channels, message_text, channel_list))
             await conn.commit()
     
     async def mark_channel_processed(self, message_id: str, channel_username: str):
@@ -674,6 +697,37 @@ class Database:
             """)
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+    
+    async def update_message_processing_info(
+        self, 
+        message_id: str, 
+        message_text: str = None, 
+        channel_list: str = None
+    ):
+        """更新消息处理信息（消息文本和频道列表）"""
+        async with self.get_connection() as conn:
+            updates = []
+            params = []
+            
+            if message_text is not None:
+                updates.append("message_text = ?")
+                params.append(message_text)
+            
+            if channel_list is not None:
+                updates.append("channel_list = ?")
+                params.append(channel_list)
+            
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(message_id)
+                
+                query = f"""
+                    UPDATE message_processing_status 
+                    SET {', '.join(updates)}
+                    WHERE message_id = ?
+                """
+                await conn.execute(query, params)
+                await conn.commit()
 
 
 # 创建全局数据库实例
