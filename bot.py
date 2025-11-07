@@ -441,6 +441,9 @@ class TelegramBot:
         # 重置批次计数器（使用实例变量，这样头像下载也能共享）
         self.channel_processing_count = 0
         
+        # 记录批量控制配置信息
+        logger.info(f"📊 批量控制配置: 批次大小={batch_size} 个, 批次延迟={cooldown_min}-{cooldown_max} 秒")
+        
         for link_url, channels in parsed_links:
             for channel in channels:
                 # 断点续传：跳过已处理的频道
@@ -651,6 +654,9 @@ class TelegramBot:
                 
                 # 增加批次计数（频道信息提取和头像下载共用）
                 self.channel_processing_count += 1
+                
+                # 记录当前批次进度
+                logger.debug(f"📈 批次进度: 当前批次已处理 {self.channel_processing_count}/{batch_size} 个频道, 总进度 {processed_total}/{total_channels}")
 
                 # 分批控制：达到批量上限后休眠一段随机时间（频道信息提取和头像下载共用）
                 remaining = total_channels - processed_total
@@ -658,8 +664,12 @@ class TelegramBot:
                     if self.channel_processing_count >= batch_size:
                         cooldown = random.uniform(cooldown_min, cooldown_max)
                         if cooldown > 0:
-                            logger.info(f"⏳ 达到批次上限 {batch_size} 个（包括信息提取和头像下载），休眠 {cooldown:.1f} 秒后继续")
+                            logger.info(f"⏳ 达到批次上限！")
+                            logger.info(f"   📊 批次统计: 已处理 {self.channel_processing_count} 个频道（批次大小: {batch_size}）")
+                            logger.info(f"   ⏱️ 批次延迟: 休眠 {cooldown:.1f} 秒（范围: {cooldown_min}-{cooldown_max} 秒）")
+                            logger.info(f"   📈 总进度: {processed_total}/{total_channels} 个频道，剩余 {remaining} 个")
                             await asyncio.sleep(cooldown)
+                            logger.info(f"✅ 批次休眠完成，继续处理剩余频道...")
                         self.channel_processing_count = 0  # 重置计数器
 
         # 标记消息处理完成（断点续传）
