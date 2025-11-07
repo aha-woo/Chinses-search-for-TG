@@ -106,6 +106,28 @@ class Database:
                 )
             """)
             
+            # 创建搜索历史表（用于热搜功能）
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS search_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    query TEXT NOT NULL,
+                    results_count INTEGER DEFAULT 0,
+                    search_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 创建索引
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_search_history_query 
+                ON search_history(query)
+            """)
+            
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_search_history_date 
+                ON search_history(search_date)
+            """)
+            
             # 创建消息处理进度表（用于断点续传）
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS message_processing_status (
@@ -728,6 +750,67 @@ class Database:
                 """
                 await conn.execute(query, params)
                 await conn.commit()
+    
+    # ============ 搜索历史管理（热搜功能） ============
+    
+    async def save_search_history(
+        self,
+        user_id: int,
+        query: str,
+        results_count: int = 0
+    ):
+        """保存搜索历史"""
+        async with self.get_connection() as conn:
+            await conn.execute("""
+                INSERT INTO search_history (user_id, query, results_count, search_date)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """, (user_id, query, results_count))
+            await conn.commit()
+    
+    async def get_popular_keywords(
+        self,
+        limit: int = 10,
+        days: int = 7
+    ) -> List[Dict]:
+        """获取热门搜索关键词（最近N天）"""
+        async with self.get_connection() as conn:
+            cursor = await conn.execute("""
+                SELECT 
+                    query,
+                    COUNT(*) as search_count,
+                    SUM(results_count) as total_results
+                FROM search_history
+                WHERE search_date >= datetime('now', '-' || ? || ' days')
+                GROUP BY query
+                ORDER BY search_count DESC, total_results DESC
+                LIMIT ?
+            """, (days, limit))
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_search_statistics(self) -> Dict:
+        """获取搜索统计信息"""
+        async with self.get_connection() as conn:
+            # 总搜索次数
+            cursor = await conn.execute("SELECT COUNT(*) as total FROM search_history")
+            total_searches = (await cursor.fetchone())['total']
+            
+            # 唯一关键词数
+            cursor = await conn.execute("SELECT COUNT(DISTINCT query) as unique FROM search_history")
+            unique_keywords = (await cursor.fetchone())['unique']
+            
+            # 今日搜索次数
+            cursor = await conn.execute("""
+                SELECT COUNT(*) as today FROM search_history
+                WHERE date(search_date) = date('now')
+            """)
+            today_searches = (await cursor.fetchone())['today']
+            
+            return {
+                'total_searches': total_searches or 0,
+                'unique_keywords': unique_keywords or 0,
+                'today_searches': today_searches or 0
+            }
 
 
 # 创建全局数据库实例

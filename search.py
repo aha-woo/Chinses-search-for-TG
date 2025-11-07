@@ -177,10 +177,9 @@ class SearchEngine:
         
         return keywords, filters
     
-    async def get_popular_keywords(self, limit: int = 10) -> List[Dict]:
-        """获取热门搜索关键词"""
-        # TODO: 实现搜索历史记录和统计
-        return []
+    async def get_popular_keywords(self, limit: int = 10, days: int = 7) -> List[Dict]:
+        """获取热门搜索关键词（最近N天）"""
+        return await db.get_popular_keywords(limit=limit, days=days)
     
     async def get_related_channels(self, keyword: str, limit: int = 5) -> List[Dict]:
         """根据关键词推荐相关频道"""
@@ -332,11 +331,13 @@ class SearchEngine:
     def _get_media_emoji(self, media_type: str) -> str:
         """获取媒体类型的 emoji"""
         emoji_map = {
-            'photo': '📸',
-            'video': '🎬',
-            'document': '📎',
-            'audio': '🎵',
-            'voice': '🎤',
+            'channel': '📺',  # 频道
+            'photo': '📸',    # 图片
+            'video': '🎬',   # 视频
+            'document': '📎', # 文档
+            'audio': '🎵',   # 音频
+            'voice': '🎤',   # 语音
+            'text': '📄',    # 文本
         }
         return emoji_map.get(media_type, '📄')
     
@@ -347,8 +348,7 @@ class SearchEngine:
         results_count: int
     ):
         """保存搜索历史（用于分析热门关键词）"""
-        # TODO: 实现搜索历史记录
-        pass
+        await db.save_search_history(user_id=user_id, query=query, results_count=results_count)
 
 
 # 创建全局搜索引擎实例

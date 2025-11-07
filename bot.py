@@ -762,6 +762,14 @@ class TelegramBot:
         try:
             results, total_pages, total_count = await search_engine.search(query, page=0)
             
+            # 保存搜索历史（用于热搜功能）
+            user_id = update.effective_user.id if update.effective_user else 0
+            await search_engine.save_search_history(
+                user_id=user_id,
+                query=query,
+                results_count=total_count
+            )
+            
             # 格式化并发送结果
             await self._send_search_results(
                 message=message,
@@ -915,6 +923,25 @@ class TelegramBot:
                     media_filter=media_filter,
                     edit=True
                 )
+        
+        # 热搜功能
+        elif data.startswith('search_hot_'):
+            # 获取热搜关键词
+            popular_keywords = await search_engine.get_popular_keywords(limit=10, days=7)
+            
+            if not popular_keywords:
+                await query.answer("暂无热搜数据", show_alert=True)
+                return
+            
+            # 格式化热搜列表
+            hot_text = "🔥 热搜（最近7天）\n\n"
+            for idx, item in enumerate(popular_keywords, 1):
+                query_text = item['query']
+                search_count = item['search_count']
+                total_results = item.get('total_results', 0)
+                hot_text += f"{idx}. {query_text} ({search_count}次搜索, {total_results}个结果)\n"
+            
+            await query.message.reply_text(hot_text)
         
         # 搜索翻页
         elif data.startswith('search_page_'):
@@ -1233,16 +1260,30 @@ class TelegramBot:
         # 3. 类型分类按钮
         keyboard = []
         
-        # 第一行：媒体类型按钮
+        # 第一行：媒体类型按钮（完整分类）
         type_buttons = [
             InlineKeyboardButton("📝 全部", callback_data=f'search_type_{query}_all_{page}'),
+            InlineKeyboardButton("📺 频道", callback_data=f'search_type_{query}_channel_{page}'),
             InlineKeyboardButton("🎬 视频", callback_data=f'search_type_{query}_video_{page}'),
             InlineKeyboardButton("📸 图片", callback_data=f'search_type_{query}_photo_{page}'),
-            InlineKeyboardButton("📎 文档", callback_data=f'search_type_{query}_document_{page}'),
         ]
         keyboard.append(type_buttons)
         
-        # 第二行：翻页按钮
+        # 第二行：更多媒体类型按钮
+        type_buttons2 = [
+            InlineKeyboardButton("📎 文档", callback_data=f'search_type_{query}_document_{page}'),
+            InlineKeyboardButton("🎵 音频", callback_data=f'search_type_{query}_audio_{page}'),
+            InlineKeyboardButton("🎤 语音", callback_data=f'search_type_{query}_voice_{page}'),
+            InlineKeyboardButton("📄 文本", callback_data=f'search_type_{query}_text_{page}'),
+        ]
+        keyboard.append(type_buttons2)
+        
+        # 第三行：热搜按钮
+        keyboard.append([
+            InlineKeyboardButton("🔥 热搜", callback_data=f'search_hot_{query}_{page}')
+        ])
+        
+        # 第四行：翻页按钮
         if total_pages > 1:
             nav_buttons = []
             
