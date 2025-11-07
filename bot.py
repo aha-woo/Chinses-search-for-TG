@@ -8,6 +8,7 @@ import random
 import os
 import html
 import re
+import urllib.parse
 from typing import Optional, List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -160,6 +161,42 @@ class TelegramBot:
         """处理 /start 命令"""
         user_id = update.effective_user.id
         is_admin = config.is_admin(user_id)
+        
+        # 检查是否有深层链接参数（用于热搜关键词点击）
+        if context.args and len(context.args) > 0:
+            start_param = context.args[0]
+            # 如果参数以 "search_" 开头，执行搜索
+            if start_param.startswith('search_'):
+                query = start_param.replace('search_', '', 1)
+                # URL解码（处理特殊字符）
+                query = urllib.parse.unquote(query)
+                
+                # 执行搜索
+                try:
+                    results, total_pages, total_count = await search_engine.search(query, page=0)
+                    
+                    # 保存搜索历史（用于热搜功能）
+                    await search_engine.save_search_history(
+                        user_id=user_id,
+                        query=query,
+                        results_count=total_count
+                    )
+                    
+                    # 格式化并发送结果
+                    await self._send_search_results(
+                        message=update.message,
+                        query=query,
+                        results=results,
+                        page=0,
+                        total_pages=total_pages,
+                        total_count=total_count,
+                        media_filter=None
+                    )
+                    return
+                except Exception as e:
+                    logger.error(f"深层链接搜索失败: {e}", exc_info=True)
+                    await update.message.reply_text(f"❌ 搜索失败: {query}\n\n请稍后重试")
+                    return
         
         welcome = "👋 欢迎使用 Telegram 中文搜索 Bot！\n\n"
         welcome += "🔍 功能介绍：\n"
@@ -935,15 +972,48 @@ class TelegramBot:
                 await query.answer("暂无热搜数据", show_alert=True)
                 return
             
-            # 格式化热搜列表
+            # 获取bot用户名（用于深层链接）
+            try:
+                bot_info = await context.bot.get_me()
+                bot_username = bot_info.username
+            except:
+                bot_username = None
+            
+            # 格式化热搜列表（关键词本身就是可点击的链接）
             hot_text = "🔥 热搜（最近7天）\n\n"
             for idx, item in enumerate(popular_keywords, 1):
                 query_text = item['query']
                 search_count = item['search_count']
                 total_results = item.get('total_results', 0)
-                hot_text += f"{idx}. {query_text} ({search_count}次搜索, {total_results}个结果)\n"
+                
+                # 转义HTML特殊字符
+                query_text_escaped = html.escape(query_text, quote=True)
+                
+                # 构建搜索链接（使用深层链接格式）
+                # 格式：https://t.me/bot_username?start=search_keyword
+                if bot_username:
+                    # URL编码关键词（处理特殊字符）
+                    query_encoded = urllib.parse.quote(query_text)
+                    # 使用深层链接，点击后触发搜索
+                    search_link = f"https://t.me/{bot_username}?start=search_{query_encoded}"
+                    hot_text += f"{idx}. <a href=\"{search_link}\">{query_text_escaped}</a> ({search_count}次搜索, {total_results}个结果)\n"
+                else:
+                    # 如果无法获取bot用户名，使用纯文本格式
+                    hot_text += f"{idx}. {query_text} ({search_count}次搜索, {total_results}个结果)\n"
             
-            await query.message.reply_text(hot_text)
+            # 发送热搜列表（使用HTML格式）
+            try:
+                await query.message.reply_text(hot_text, parse_mode=ParseMode.HTML)
+            except Exception as e:
+                logger.error(f"发送热搜列表失败: {e}", exc_info=True)
+                # 如果HTML解析失败，使用纯文本格式
+                hot_text_plain = "🔥 热搜（最近7天）\n\n"
+                for idx, item in enumerate(popular_keywords, 1):
+                    query_text = item['query']
+                    search_count = item['search_count']
+                    total_results = item.get('total_results', 0)
+                    hot_text_plain += f"{idx}. {query_text} ({search_count}次搜索, {total_results}个结果)\n"
+                await query.message.reply_text(hot_text_plain)
         
         # 搜索翻页
         elif data.startswith('search_page_'):
