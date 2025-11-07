@@ -498,6 +498,10 @@ class TelegramBot:
                     if chat.type not in ['channel', 'supergroup', 'group']:
                         logger.warning(f"⏭️ 跳过非频道/群组: @{channel.username} (类型: {chat.type})")
                         skipped_count += 1
+                        processed_total += 1
+                        # 注意：虽然调用了API，但跳过的频道不计入批次计数（因为不需要进一步处理）
+                        # 但需要标记为已处理（断点续传）
+                        await db.mark_channel_processed(message_id_str, channel.username)
                         continue
 
                     channel_title = chat.title
@@ -566,6 +570,10 @@ class TelegramBot:
                     if "not found" in error_msg.lower() or "chat not found" in error_msg.lower():
                         logger.warning(f"❌ 频道不存在，跳过: @{channel.username}")
                         skipped_count += 1
+                        processed_total += 1
+                        # 注意：虽然尝试了API调用，但跳过的频道不计入批次计数（因为不需要进一步处理）
+                        # 但需要标记为已处理（断点续传）
+                        await db.mark_channel_processed(message_id_str, channel.username)
                         continue
                     
                     # 如果是速率限制，记录警告但继续（保存基本信息）
