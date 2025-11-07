@@ -126,6 +126,22 @@ class SearchEngine:
         # 合并channels和messages结果
         all_combined = formatted_channels + all_results['messages']
         
+        # 去重：根据 channel_username 和 message_id 去重
+        seen = set()
+        unique_results = []
+        for result in all_combined:
+            # 生成唯一标识：频道结果用 channel_username，消息结果用 channel_username + message_id
+            if result.get('is_channel') or result.get('media_type') == 'channel':
+                key = f"channel_{result.get('channel_username', '')}"
+            else:
+                key = f"message_{result.get('channel_username', '')}_{result.get('message_id', '')}"
+            
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(result)
+        
+        all_combined = unique_results
+        
         # 按时间排序（最新的在前）
         all_combined.sort(
             key=lambda x: x.get('collected_date') or x.get('publish_date') or '',

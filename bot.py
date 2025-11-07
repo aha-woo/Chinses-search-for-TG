@@ -1257,28 +1257,23 @@ class TelegramBot:
                 )
                 response += result_text + "\n"
         
-        # 3. 类型分类按钮
+        # 3. 类型分类按钮（一行显示，使用小图标）
         keyboard = []
         
-        # 第一行：媒体类型按钮（完整分类）
+        # 第一行：所有媒体类型按钮（8个按钮一行显示）
         type_buttons = [
-            InlineKeyboardButton("📝 全部", callback_data=f'search_type_{query}_all_{page}'),
-            InlineKeyboardButton("📺 频道", callback_data=f'search_type_{query}_channel_{page}'),
-            InlineKeyboardButton("🎬 视频", callback_data=f'search_type_{query}_video_{page}'),
-            InlineKeyboardButton("📸 图片", callback_data=f'search_type_{query}_photo_{page}'),
+            InlineKeyboardButton("全", callback_data=f'search_type_{query}_all_{page}'),
+            InlineKeyboardButton("📺", callback_data=f'search_type_{query}_channel_{page}'),
+            InlineKeyboardButton("🎬", callback_data=f'search_type_{query}_video_{page}'),
+            InlineKeyboardButton("📸", callback_data=f'search_type_{query}_photo_{page}'),
+            InlineKeyboardButton("📎", callback_data=f'search_type_{query}_document_{page}'),
+            InlineKeyboardButton("🎵", callback_data=f'search_type_{query}_audio_{page}'),
+            InlineKeyboardButton("🎤", callback_data=f'search_type_{query}_voice_{page}'),
+            InlineKeyboardButton("📄", callback_data=f'search_type_{query}_text_{page}'),
         ]
         keyboard.append(type_buttons)
         
-        # 第二行：更多媒体类型按钮
-        type_buttons2 = [
-            InlineKeyboardButton("📎 文档", callback_data=f'search_type_{query}_document_{page}'),
-            InlineKeyboardButton("🎵 音频", callback_data=f'search_type_{query}_audio_{page}'),
-            InlineKeyboardButton("🎤 语音", callback_data=f'search_type_{query}_voice_{page}'),
-            InlineKeyboardButton("📄 文本", callback_data=f'search_type_{query}_text_{page}'),
-        ]
-        keyboard.append(type_buttons2)
-        
-        # 第三行：热搜按钮
+        # 第二行：热搜按钮
         keyboard.append([
             InlineKeyboardButton("🔥 热搜", callback_data=f'search_hot_{query}_{page}')
         ])
