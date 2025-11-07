@@ -6,6 +6,8 @@ import logging
 import asyncio
 import random
 import os
+import html
+import re
 from typing import Optional, List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -1324,22 +1326,97 @@ class TelegramBot:
                 )
         except Exception as e:
             logger.error(f"发送搜索结果失败 (HTML): {e}", exc_info=True)
-            # 如果 HTML 解析失败，回退到纯文本模式
+            # 如果 HTML 解析失败，尝试修复HTML格式后重试
+            import re
             try:
+                # 修复HTML格式：确保所有HTML标签正确闭合，转义特殊字符
+                # 提取并修复所有链接
+                def fix_html_link(match):
+                    url = match.group(1)
+                    text = match.group(2)
+                    # 转义链接文本中的HTML特殊字符
+                    text_escaped = html.escape(text, quote=True)
+                    return f'<a href="{url}">{text_escaped}</a>'
+                
+                # 修复所有链接格式
+                response_fixed = re.sub(
+                    r'<a href="([^"]+)">([^<]+)</a>',
+                    fix_html_link,
+                    response
+                )
+                
+                # 确保其他HTML特殊字符也被转义
+                # 但不要转义已经转义的字符
+                lines = response_fixed.split('\n')
+                fixed_lines = []
+                for line in lines:
+                    # 如果行中包含链接，只转义链接外的部分
+                    if '<a href=' in line:
+                        # 链接已经处理过了，只处理链接外的部分
+                        parts = re.split(r'(<a href="[^"]+">[^<]+</a>)', line)
+                        fixed_parts = []
+                        for part in parts:
+                            if part.startswith('<a href='):
+                                fixed_parts.append(part)
+                            else:
+                                fixed_parts.append(html.escape(part, quote=True))
+                        fixed_lines.append(''.join(fixed_parts))
+                    else:
+                        fixed_lines.append(html.escape(line, quote=True))
+                
+                response_fixed = '\n'.join(fixed_lines)
+                
+                # 使用修复后的HTML重试
                 if edit and hasattr(message, 'edit_text'):
                     await message.edit_text(
-                        response,
+                        response_fixed,
                         reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML,
                         disable_web_page_preview=True
                     )
                 else:
                     await message.reply_text(
-                        response,
+                        response_fixed,
                         reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML,
                         disable_web_page_preview=True
                     )
             except Exception as e2:
-                logger.error(f"发送搜索结果完全失败: {e2}", exc_info=True)
+                logger.error(f"修复HTML后仍然失败: {e2}", exc_info=True)
+                # 最后尝试：使用Markdown格式（虽然会显示方括号，但至少可以点击）
+                try:
+                    import re
+                    # 将HTML链接转换为Markdown格式
+                    response_md = re.sub(
+                        r'<a href="([^"]+)">([^<]+)</a>',
+                        r'[\2](\1)',
+                        response
+                    )
+                    # 移除所有其他HTML标签
+                    response_md = re.sub(r'<[^>]+>', '', response_md)
+                    # 解码HTML实体
+                    response_md = response_md.replace('&amp;', '&')
+                    response_md = response_md.replace('&lt;', '<')
+                    response_md = response_md.replace('&gt;', '>')
+                    response_md = response_md.replace('&quot;', '"')
+                    response_md = response_md.replace('&#39;', "'")
+                    
+                    if edit and hasattr(message, 'edit_text'):
+                        await message.edit_text(
+                            response_md,
+                            reply_markup=reply_markup,
+                            parse_mode=ParseMode.MARKDOWN,
+                            disable_web_page_preview=True
+                        )
+                    else:
+                        await message.reply_text(
+                            response_md,
+                            reply_markup=reply_markup,
+                            parse_mode=ParseMode.MARKDOWN,
+                            disable_web_page_preview=True
+                        )
+                except Exception as e3:
+                    logger.error(f"发送搜索结果最终失败: {e3}", exc_info=True)
     
     def _get_media_type_name(self, media_type: str) -> str:
         """获取媒体类型的中文名称"""
