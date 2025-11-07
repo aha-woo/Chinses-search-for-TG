@@ -389,6 +389,23 @@ class SearchEngine:
         
         return text
     
+    def _escape_html_for_link(self, text: str) -> str:
+        """转义 HTML 特殊字符（用于链接文本）
+        
+        在 <a href="url">text</a> 格式中，text 部分需要转义 HTML 特殊字符
+        """
+        if not text:
+            return text
+        
+        # HTML 特殊字符转义
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        text = text.replace('"', '&quot;')
+        text = text.replace("'", '&#39;')
+        
+        return text
+    
     def _get_media_emoji(self, media_type: str) -> str:
         """获取媒体类型的 emoji"""
         emoji_map = {
