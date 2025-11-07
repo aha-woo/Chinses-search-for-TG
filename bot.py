@@ -1224,13 +1224,15 @@ class TelegramBot:
         
         # 1. 顶部广告位
         if config.SEARCH_AD_ENABLED and config.SEARCH_AD_TEXT:
-            ad_text = search_engine._escape_markdown(config.SEARCH_AD_TEXT)
+            # 转义HTML特殊字符
+            ad_text = config.SEARCH_AD_TEXT.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             response += f"📢 {ad_text}\n"
             response += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
         # 2. 搜索结果（参照截图格式：简洁清晰）
         if not results:
-            query_text = search_engine._escape_markdown(query)
+            # 转义HTML特殊字符
+            query_text = query.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             response += f"🔍 搜索: \"{query_text}\"\n\n"
             response += "😔 未找到相关内容\n\n"
             response += "💡 提示:\n"
@@ -1304,25 +1306,25 @@ class TelegramBot:
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # 发送消息（使用 Markdown 模式，支持超链接格式）
+        # 发送消息（使用 HTML 模式，支持超链接格式，确保一致性）
         try:
             if edit and hasattr(message, 'edit_text'):
                 await message.edit_text(
                     response,
                     reply_markup=reply_markup,
-                    parse_mode=ParseMode.MARKDOWN,
+                    parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True
                 )
             else:
                 await message.reply_text(
                     response,
                     reply_markup=reply_markup,
-                    parse_mode=ParseMode.MARKDOWN,
+                    parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True
                 )
         except Exception as e:
-            logger.error(f"发送搜索结果失败 (Markdown): {e}", exc_info=True)
-            # 如果 Markdown 解析失败，回退到纯文本模式
+            logger.error(f"发送搜索结果失败 (HTML): {e}", exc_info=True)
+            # 如果 HTML 解析失败，回退到纯文本模式
             try:
                 if edit and hasattr(message, 'edit_text'):
                     await message.edit_text(

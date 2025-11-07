@@ -308,8 +308,8 @@ class SearchEngine:
             if len(display_content) > max_length:
                 display_content = display_content[:max_length] + "..."
         
-        # 转义 Markdown 特殊字符（避免链接格式被破坏）
-        display_content = self._escape_markdown_for_link(display_content)
+        # 转义 HTML 特殊字符（避免链接格式被破坏）
+        display_content = self._escape_html_for_link(display_content)
         
         # 获取媒体类型emoji
         media_type = result.get('media_type', 'text')
@@ -346,10 +346,11 @@ class SearchEngine:
             elif storage_message_id:
                 link_url = f"https://t.me/c/{storage_channel_id}/{storage_message_id}"
         
-        # 格式化结果：文字本身就是超链接（Markdown 格式）
+        # 格式化结果：文字本身就是超链接（HTML 格式，确保一致性）
         if link_url:
-            # 使用 Markdown 超链接格式：[文字](链接)
-            formatted = f"{index}{media_emoji} [{display_content}]({link_url})"
+            # 使用 HTML 超链接格式：<a href="链接">文字</a>
+            # 这样文字本身就是超链接，不会显示方括号和链接明文
+            formatted = f"{index}{media_emoji} <a href=\"{link_url}\">{display_content}</a>"
         else:
             # 没有链接时，只显示文字
             formatted = f"{index}{media_emoji} {display_content}"
