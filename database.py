@@ -9,8 +9,11 @@ from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 from contextlib import asynccontextmanager
 import os
+import logging
 
 from config import config
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -55,9 +58,27 @@ class Database:
                     is_crawling_enabled BOOLEAN DEFAULT 0,
                     last_crawled TIMESTAMP,
                     status TEXT DEFAULT 'pending',
-                    notes TEXT
+                    notes TEXT,
+                    description TEXT,
+                    photo_file_id TEXT
                 )
             """)
+            
+            # 数据库迁移：为现有表添加新字段（如果不存在）
+            try:
+                # 检查 description 字段是否存在
+                cursor = await conn.execute("PRAGMA table_info(channels)")
+                columns = [row[1] for row in await cursor.fetchall()]
+                
+                if 'description' not in columns:
+                    await conn.execute("ALTER TABLE channels ADD COLUMN description TEXT")
+                    logger.info("✅ 已添加 description 字段")
+                
+                if 'photo_file_id' not in columns:
+                    await conn.execute("ALTER TABLE channels ADD COLUMN photo_file_id TEXT")
+                    logger.info("✅ 已添加 photo_file_id 字段")
+            except Exception as e:
+                logger.warning(f"⚠️ 数据库迁移可能失败（字段可能已存在）: {e}")
             
             # 创建消息索引表
             await conn.execute("""
@@ -118,7 +139,9 @@ class Database:
         title: str = None,
         channel_type: str = 'channel',
         discovered_from: str = None,
-        category: str = 'uncategorized'
+        category: str = 'uncategorized',
+        description: str = None,
+        photo_file_id: str = None
     ) -> Optional[int]:
         """添加频道"""
         async with self.get_connection() as conn:
@@ -126,9 +149,9 @@ class Database:
                 cursor = await conn.execute("""
                     INSERT INTO channels 
                     (channel_username, channel_id, channel_title, channel_type, 
-                     discovered_from, category)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (username, channel_id, title, channel_type, discovered_from, category))
+                     discovered_from, category, description, photo_file_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (username, channel_id, title, channel_type, discovered_from, category, description, photo_file_id))
                 await conn.commit()
                 return cursor.lastrowid
             except sqlite3.IntegrityError:

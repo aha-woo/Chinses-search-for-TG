@@ -36,6 +36,15 @@ class Config:
     # 数据库配置
     DATABASE_PATH: str = os.getenv('DATABASE_PATH', './data/channels.db')
     
+    # 头像存储配置
+    AVATAR_STORAGE_DIR: str = os.getenv('AVATAR_STORAGE_DIR', './data/avatars')  # 头像存储目录
+    AVATAR_DOWNLOAD_ENABLED: bool = os.getenv('AVATAR_DOWNLOAD_ENABLED', 'true').lower() == 'true'  # 是否启用头像下载
+    AVATAR_DOWNLOAD_DELAY: float = float(os.getenv('AVATAR_DOWNLOAD_DELAY', '1.0'))  # 每个头像下载间隔（秒）
+    AVATAR_DOWNLOAD_RANDOM_DELAY: float = float(os.getenv('AVATAR_DOWNLOAD_RANDOM_DELAY', '0.5'))  # 随机延迟范围（秒）
+    AVATAR_DOWNLOAD_BATCH_SIZE: int = int(os.getenv('AVATAR_DOWNLOAD_BATCH_SIZE', '10'))  # 每批下载的头像数量
+    AVATAR_DOWNLOAD_BATCH_COOLDOWN_MIN: int = int(os.getenv('AVATAR_DOWNLOAD_BATCH_COOLDOWN_MIN', '60'))  # 批次之间等待的最小秒数（默认 1 分钟）
+    AVATAR_DOWNLOAD_BATCH_COOLDOWN_MAX: int = int(os.getenv('AVATAR_DOWNLOAD_BATCH_COOLDOWN_MAX', '180'))  # 批次之间等待的最大秒数（默认 3 分钟）
+    
     # 日志配置
     LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
     
@@ -56,6 +65,7 @@ class Config:
     # 存储频道发送配置
     STORAGE_SEND_DELAY: float = float(os.getenv('STORAGE_SEND_DELAY', '2.0'))  # 发送到存储频道的延迟（秒）
     STORAGE_SEND_RANDOM_DELAY: float = float(os.getenv('STORAGE_SEND_RANDOM_DELAY', '0.5'))  # 随机延迟范围（秒）
+    STORAGE_FORWARD_ENABLED: bool = os.getenv('STORAGE_FORWARD_ENABLED', 'false').lower() == 'true'  # 是否启用转发到存储频道
     
     # API 调用限制（防止触发 Telegram 速率限制）
     API_DAILY_LIMIT: int = int(os.getenv('API_DAILY_LIMIT', '200'))  # 24 小时窗口内允许的 getChat 次数

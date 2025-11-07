@@ -5,6 +5,7 @@ Bot 主程序
 import logging
 import asyncio
 import random
+import os
 from typing import Optional, List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -40,6 +41,8 @@ class TelegramBot:
             max_calls=config.API_DAILY_LIMIT,
             window_seconds=24 * 60 * 60
         )
+        # 频道处理和头像下载共用批量控制（因为它们是一起进行的）
+        self.channel_processing_count = 0  # 当前批次处理的频道数量（包括信息提取和头像下载）
     
     def create_app(self) -> Application:
         """创建 Application 实例"""
@@ -412,11 +415,13 @@ class TelegramBot:
         # 3. 处理所有链接（添加速率限制和验证）
         added_count = 0
         skipped_count = 0
-        processed_in_batch = 0
+        # 使用统一的批次控制（频道信息提取和头像下载共用）
         batch_size = max(1, config.API_BATCH_SIZE)
         cooldown_min = max(0, config.API_BATCH_COOLDOWN_MIN)
         cooldown_max = max(cooldown_min, config.API_BATCH_COOLDOWN_MAX)
         processed_total = 0
+        # 重置批次计数器（使用实例变量，这样头像下载也能共享）
+        self.channel_processing_count = 0
         
         for link_url, channels in parsed_links:
             for channel in channels:
@@ -441,6 +446,8 @@ class TelegramBot:
                 channel_id_str = None
                 member_count = None
                 is_verified = False
+                channel_description = None
+                photo_file_id = None
                 channel_exists = False
                 
                 try:
@@ -472,6 +479,41 @@ class TelegramBot:
                     channel_title = chat.title
                     channel_id_str = str(chat.id)
                     channel_exists = True
+                    
+                    # 获取频道说明信息
+                    if hasattr(chat, 'description') and chat.description:
+                        channel_description = chat.description
+                        logger.debug(f"📝 获取频道说明: {channel_description[:50]}...")
+                    
+                    # 获取验证状态
+                    if hasattr(chat, 'verified'):
+                        is_verified = chat.verified
+                    
+                    # 获取头像信息
+                    if hasattr(chat, 'photo') and chat.photo:
+                        try:
+                            # chat.photo 是 ChatPhoto 对象，包含 small_file_id 和 big_file_id
+                            # 使用 big_file_id 作为头像标识（更清晰）
+                            photo_file_id = chat.photo.big_file_id if hasattr(chat.photo, 'big_file_id') else None
+                            if not photo_file_id and hasattr(chat.photo, 'small_file_id'):
+                                photo_file_id = chat.photo.small_file_id
+                            if photo_file_id:
+                                logger.debug(f"🖼️ 获取频道头像: {photo_file_id}")
+                                
+                                # 下载头像文件
+                                if channel_id_str:
+                                    try:
+                                        avatar_path = await self._download_channel_avatar(
+                                            photo_file_id=photo_file_id,
+                                            channel_id=channel_id_str,
+                                            context=context
+                                        )
+                                        if avatar_path:
+                                            logger.debug(f"💾 头像已保存到: {avatar_path}")
+                                    except Exception as e:
+                                        logger.warning(f"⚠️ 下载头像文件失败: {e}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ 无法获取头像信息: {e}")
 
                     # 获取成员数
                     try:
@@ -514,7 +556,9 @@ class TelegramBot:
                         channel_id=channel_id_str,
                         title=channel_title,
                         discovered_from=str(message.message_id),
-                        category=category
+                        category=category,
+                        description=channel_description,
+                        photo_file_id=photo_file_id
                     )
                     
                     if db_id:
@@ -525,6 +569,10 @@ class TelegramBot:
                         # 如果获取到了成员数，更新到数据库
                         if member_count:
                             await db.update_channel_by_username(channel.username, member_count=member_count)
+                        
+                        # 如果获取到了验证状态，更新到数据库
+                        if is_verified:
+                            await db.update_channel_by_username(channel.username, is_verified=is_verified)
                         
                         # 发送频道元信息到 SearchDataStore 频道（利用 Telegram 无限存储）
                         try:
@@ -539,19 +587,36 @@ class TelegramBot:
                             )
                         except Exception as e:
                             logger.warning(f"⚠️ 无法发送频道元信息到存储频道: {e}")
+                    else:
+                        # 频道已存在，更新信息（包括 description 和 photo_file_id）
+                        update_data = {}
+                        if channel_description is not None:
+                            update_data['description'] = channel_description
+                        if photo_file_id is not None:
+                            update_data['photo_file_id'] = photo_file_id
+                        if member_count:
+                            update_data['member_count'] = member_count
+                        if is_verified:
+                            update_data['is_verified'] = is_verified
+                        
+                        if update_data:
+                            await db.update_channel_by_username(channel.username, **update_data)
+                            logger.debug(f"🔄 已更新频道信息: @{channel.username}")
         
                 processed_total += 1
+                
+                # 增加批次计数（频道信息提取和头像下载共用）
+                self.channel_processing_count += 1
 
-                # 分批控制：达到批量上限后休眠一段随机时间
+                # 分批控制：达到批量上限后休眠一段随机时间（频道信息提取和头像下载共用）
                 remaining = total_channels - processed_total
                 if remaining > 0:
-                    processed_in_batch += 1
-                    if processed_in_batch >= batch_size:
+                    if self.channel_processing_count >= batch_size:
                         cooldown = random.uniform(cooldown_min, cooldown_max)
                         if cooldown > 0:
-                            logger.info(f"⏳ 达到批次上限 {batch_size} 个，休眠 {cooldown:.1f} 秒后继续")
+                            logger.info(f"⏳ 达到批次上限 {batch_size} 个（包括信息提取和头像下载），休眠 {cooldown:.1f} 秒后继续")
                             await asyncio.sleep(cooldown)
-                        processed_in_batch = 0
+                        self.channel_processing_count = 0  # 重置计数器
 
         # 输出统计信息
         if added_count > 0 or skipped_count > 0:
@@ -807,6 +872,75 @@ class TelegramBot:
     
     # ============ 辅助方法 ============
     
+    async def _download_channel_avatar(
+        self,
+        photo_file_id: str,
+        channel_id: str,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> Optional[str]:
+        """
+        下载频道头像文件
+        
+        Args:
+            photo_file_id: Telegram 文件ID
+            channel_id: 频道ID（用于文件名）
+            context: Bot 上下文
+            
+        Returns:
+            下载的文件路径，如果失败返回 None
+        """
+        if not config.AVATAR_DOWNLOAD_ENABLED:
+            logger.debug("⏭️ 头像下载功能已禁用")
+            return None
+        
+        if not photo_file_id:
+            return None
+        
+        try:
+            # 添加延迟，避免触发速率限制（调用官方接口函数之间的延迟）
+            base_delay = config.AVATAR_DOWNLOAD_DELAY
+            random_delay = random.uniform(0, config.AVATAR_DOWNLOAD_RANDOM_DELAY)
+            total_delay = base_delay + random_delay
+            logger.debug(f"⏱️ 等待 {total_delay:.1f} 秒后下载头像 (频道ID: {channel_id})")
+            await asyncio.sleep(total_delay)
+            
+            # 确保存储目录存在
+            os.makedirs(config.AVATAR_STORAGE_DIR, exist_ok=True)
+            
+            # 获取文件信息
+            file = await context.bot.get_file(photo_file_id)
+            
+            # 确定文件扩展名（根据文件路径或默认使用 jpg）
+            file_path = file.file_path if hasattr(file, 'file_path') and file.file_path else None
+            if file_path:
+                # 从文件路径提取扩展名
+                ext = os.path.splitext(file_path)[1] or '.jpg'
+            else:
+                # 默认使用 jpg
+                ext = '.jpg'
+            
+            # 构建文件名：使用 channel_id 和 photo_file_id 的组合，确保唯一性
+            # 文件名格式：{channel_id}_{photo_file_id}{ext}
+            # 为了安全，清理文件名中的特殊字符
+            safe_file_id = photo_file_id.replace('/', '_').replace('\\', '_').replace(':', '_')
+            filename = f"{channel_id}_{safe_file_id}{ext}"
+            file_path = os.path.join(config.AVATAR_STORAGE_DIR, filename)
+            
+            # 如果文件已存在，跳过下载
+            if os.path.exists(file_path):
+                logger.debug(f"⏭️ 头像文件已存在，跳过下载: {filename}")
+                return file_path
+            
+            # 下载文件
+            await file.download(file_path)
+            logger.info(f"✅ 已下载头像文件: {filename} (文件ID: {photo_file_id})")
+            
+            return file_path
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 下载头像文件失败 (文件ID: {photo_file_id}): {e}")
+            return None
+    
     async def _save_channel_metadata_to_storage(
         self,
         channel_username: str,
@@ -822,7 +956,13 @@ class TelegramBot:
         利用 Telegram 的无限存储，备份频道元数据
         这样频道信息本身也成为可搜索的数据
         """
+        # 检查转发功能是否启用
+        if not config.STORAGE_FORWARD_ENABLED:
+            logger.debug(f"⏭️ 转发功能已禁用，跳过转发频道元信息: @{channel_username}")
+            return
+        
         if not config.STORAGE_CHANNEL_ID:
+            logger.debug(f"⏭️ 存储频道ID未配置，跳过转发频道元信息: @{channel_username}")
             return
         
         # 格式化频道元信息卡片
