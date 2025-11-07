@@ -127,24 +127,65 @@ class SearchEngine:
         all_combined = formatted_channels + all_results['messages']
         
         # 去重：根据 channel_username 和 message_id 去重
-        seen = set()
+        # 注意：messages表中可能也包含频道元信息（content包含"#频道元信息"），需要特殊处理
+        seen = {}
         unique_results = []
         for result in all_combined:
-            # 生成唯一标识：频道结果用 channel_username，消息结果用 channel_username + message_id
-            if result.get('is_channel') or result.get('media_type') == 'channel':
-                key = f"channel_{result.get('channel_username', '')}"
-            else:
-                key = f"message_{result.get('channel_username', '')}_{result.get('message_id', '')}"
+            content = result.get('content', '')
+            is_channel_metadata = '#频道元信息' in content or '分类:' in content
+            channel_username = result.get('channel_username', '') or ''
+            message_id = result.get('message_id', '') or ''
             
-            if key not in seen:
-                seen.add(key)
+            # 生成唯一标识：
+            # 1. 如果是频道元信息（无论是来自channels表还是messages表），都用channel_username去重
+            # 2. 如果是普通消息，用channel_username + message_id去重
+            if result.get('is_channel') or result.get('media_type') == 'channel' or is_channel_metadata:
+                # 频道结果：使用channel_username作为唯一标识
+                key = f"channel_{channel_username}"
+            else:
+                # 普通消息：使用channel_username + message_id作为唯一标识
+                key = f"message_{channel_username}_{message_id}"
+            
+            # 如果key为空，使用content作为备用标识
+            if not key or key in ['channel_', 'message__']:
+                key = f"content_{hash(content)}"
+            
+            # 如果key已存在，检查是否需要替换（优先保留来自channels表的结果，且有更好的链接）
+            if key in seen:
+                existing_result = seen[key]
+                should_replace = False
+                
+                # 如果当前结果来自channels表（is_channel=True），优先保留
+                if result.get('is_channel') and not existing_result.get('is_channel'):
+                    should_replace = True
+                # 如果都是频道结果，优先保留有channel_username的（链接更直接）
+                elif result.get('is_channel') and existing_result.get('is_channel'):
+                    result_username = (result.get('channel_username') or '').lstrip('@')
+                    existing_username = (existing_result.get('channel_username') or '').lstrip('@')
+                    if result_username and not existing_username:
+                        should_replace = True
+                
+                if should_replace:
+                    seen[key] = result
+                    # 替换已存在的结果
+                    unique_results = [r for r in unique_results if r != existing_result]
+                    unique_results.append(result)
+                # 否则保留已存在的结果（不添加重复项）
+            else:
+                seen[key] = result
                 unique_results.append(result)
         
         all_combined = unique_results
         
-        # 按时间排序（最新的在前）
+        # 按时间排序（最新的在前），使用稳定的排序键
+        # 如果时间相同，使用id作为次要排序键，确保排序稳定
         all_combined.sort(
-            key=lambda x: x.get('collected_date') or x.get('publish_date') or '',
+            key=lambda x: (
+                x.get('collected_date') or x.get('publish_date') or '',
+                x.get('id') or 0,
+                x.get('channel_username') or '',
+                x.get('message_id') or ''
+            ),
             reverse=True
         )
         
@@ -289,12 +330,15 @@ class SearchEngine:
         storage_channel_id = str(config.STORAGE_CHANNEL_ID).replace('-100', '')
         is_private_identifier = channel_username.startswith('c_') if channel_username else False
         
+        # 统一链接格式：优先使用channel_username，其次使用storage_message_id
         if is_channel_metadata:
+            # 频道元信息：优先使用channel_username链接
             if channel_username and not is_private_identifier:
                 link_url = f"https://t.me/{channel_username}"
             elif storage_message_id:
                 link_url = f"https://t.me/c/{storage_channel_id}/{storage_message_id}"
         else:
+            # 普通消息：优先使用channel_username + message_id，其次使用channel_username，最后使用storage_message_id
             if channel_username and not is_private_identifier and message_id:
                 link_url = f"https://t.me/{channel_username}/{message_id}"
             elif channel_username and not is_private_identifier:
