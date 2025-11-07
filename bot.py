@@ -412,6 +412,24 @@ class TelegramBot:
         total_channels = sum(len(channels) for _, channels in parsed_links)
         logger.info(f"📊 总共收集到 {total_channels} 个频道候选")
         
+        # 检查是否有未完成的处理进度（断点续传）
+        message_id_str = str(message.message_id)
+        processing_status = await db.get_message_processing_status(message_id_str)
+        processed_channels_set = set()
+        
+        if processing_status:
+            if processing_status['status'] == 'completed':
+                logger.info(f"ℹ️ 消息 {message_id_str} 已处理完成，跳过")
+                return
+            elif processing_status['status'] == 'processing':
+                # 获取已处理的频道列表
+                processed_channels_set = await db.get_processed_channels(message_id_str)
+                logger.info(f"🔄 检测到未完成的处理进度，已处理 {len(processed_channels_set)} 个频道，从断点继续...")
+        else:
+            # 初始化处理进度
+            await db.init_message_processing(message_id_str, total_channels)
+            logger.info(f"📝 初始化消息处理进度: {message_id_str} (共 {total_channels} 个频道)")
+        
         # 3. 处理所有链接（添加速率限制和验证）
         added_count = 0
         skipped_count = 0
@@ -425,6 +443,12 @@ class TelegramBot:
         
         for link_url, channels in parsed_links:
             for channel in channels:
+                # 断点续传：跳过已处理的频道
+                if channel.username in processed_channels_set:
+                    logger.debug(f"⏭️ 跳过已处理的频道: @{channel.username}")
+                    skipped_count += 1
+                    processed_total += 1
+                    continue
                 # 跳过 Bot（username 以 'bot' 结尾的）
                 if channel.username.lower().endswith('bot'):
                     logger.info(f"⏭️ 跳过 Bot: @{channel.username}")
@@ -608,6 +632,12 @@ class TelegramBot:
                         if update_data:
                             await db.update_channel_by_username(channel.username, **update_data)
                             logger.debug(f"🔄 已更新频道信息: @{channel.username}")
+                    
+                    # 标记频道已处理（断点续传）- 无论新增还是更新，都标记为已处理
+                    await db.mark_channel_processed(message_id_str, channel.username)
+                else:
+                    # 即使频道不存在或处理失败，也标记为已处理（避免重复尝试）
+                    await db.mark_channel_processed(message_id_str, channel.username)
         
                 processed_total += 1
                 
@@ -624,6 +654,9 @@ class TelegramBot:
                             await asyncio.sleep(cooldown)
                         self.channel_processing_count = 0  # 重置计数器
 
+        # 标记消息处理完成（断点续传）
+        await db.complete_message_processing(message_id_str)
+        
         # 输出统计信息
         if added_count > 0 or skipped_count > 0:
             summary = f"📺 消息 {message.message_id} 处理完成："

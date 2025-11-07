@@ -106,6 +106,25 @@ class Database:
                 )
             """)
             
+            # 创建消息处理进度表（用于断点续传）
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS message_processing_status (
+                    message_id TEXT PRIMARY KEY,
+                    total_channels INTEGER DEFAULT 0,
+                    processed_channels TEXT DEFAULT '',
+                    status TEXT DEFAULT 'processing',
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 创建索引
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_message_status 
+                ON message_processing_status(status)
+            """)
+            
             # 创建索引
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_channels_username 
@@ -575,6 +594,86 @@ class Database:
     async def set_crawler_status(self, enabled: bool):
         """设置爬虫状态"""
         await self.set_config('crawler_enabled', 'true' if enabled else 'false')
+    
+    # ============ 消息处理进度管理（断点续传） ============
+    
+    async def get_message_processing_status(self, message_id: str) -> Optional[Dict]:
+        """获取消息处理状态"""
+        async with self.get_connection() as conn:
+            cursor = await conn.execute("""
+                SELECT * FROM message_processing_status WHERE message_id = ?
+            """, (message_id,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    
+    async def init_message_processing(self, message_id: str, total_channels: int):
+        """初始化消息处理状态"""
+        async with self.get_connection() as conn:
+            await conn.execute("""
+                INSERT OR REPLACE INTO message_processing_status 
+                (message_id, total_channels, processed_channels, status, started_at, updated_at)
+                VALUES (?, ?, '', 'processing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (message_id, total_channels))
+            await conn.commit()
+    
+    async def mark_channel_processed(self, message_id: str, channel_username: str):
+        """标记频道已处理"""
+        async with self.get_connection() as conn:
+            # 获取当前已处理的频道列表
+            cursor = await conn.execute("""
+                SELECT processed_channels FROM message_processing_status WHERE message_id = ?
+            """, (message_id,))
+            row = await cursor.fetchone()
+            
+            if row:
+                processed = row['processed_channels'] or ''
+                processed_list = processed.split(',') if processed else []
+                
+                # 添加新处理的频道（去重）
+                if channel_username not in processed_list:
+                    processed_list.append(channel_username)
+                    processed_str = ','.join(processed_list)
+                    
+                    # 更新处理进度
+                    await conn.execute("""
+                        UPDATE message_processing_status 
+                        SET processed_channels = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE message_id = ?
+                    """, (processed_str, message_id))
+                    await conn.commit()
+    
+    async def get_processed_channels(self, message_id: str) -> set:
+        """获取已处理的频道列表"""
+        async with self.get_connection() as conn:
+            cursor = await conn.execute("""
+                SELECT processed_channels FROM message_processing_status WHERE message_id = ?
+            """, (message_id,))
+            row = await cursor.fetchone()
+            
+            if row and row['processed_channels']:
+                return set(row['processed_channels'].split(','))
+            return set()
+    
+    async def complete_message_processing(self, message_id: str):
+        """标记消息处理完成"""
+        async with self.get_connection() as conn:
+            await conn.execute("""
+                UPDATE message_processing_status 
+                SET status = 'completed', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE message_id = ?
+            """, (message_id,))
+            await conn.commit()
+    
+    async def get_incomplete_messages(self) -> List[Dict]:
+        """获取未完成处理的消息列表"""
+        async with self.get_connection() as conn:
+            cursor = await conn.execute("""
+                SELECT * FROM message_processing_status 
+                WHERE status = 'processing'
+                ORDER BY started_at ASC
+            """)
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
 
 # 创建全局数据库实例
