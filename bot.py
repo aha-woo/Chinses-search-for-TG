@@ -498,7 +498,7 @@ class TelegramBot:
                             if not photo_file_id and hasattr(chat.photo, 'small_file_id'):
                                 photo_file_id = chat.photo.small_file_id
                             if photo_file_id:
-                                logger.debug(f"🖼️ 获取频道头像: {photo_file_id}")
+                                logger.info(f"🖼️ 获取频道头像: @{channel.username} (文件ID: {photo_file_id})")
                                 
                                 # 下载头像文件
                                 if channel_id_str:
@@ -509,11 +509,17 @@ class TelegramBot:
                                             context=context
                                         )
                                         if avatar_path:
-                                            logger.debug(f"💾 头像已保存到: {avatar_path}")
+                                            logger.info(f"💾 头像已保存到: {avatar_path}")
+                                        else:
+                                            logger.warning(f"⚠️ 头像下载返回空路径: @{channel.username}")
                                     except Exception as e:
-                                        logger.warning(f"⚠️ 下载头像文件失败: {e}")
+                                        logger.warning(f"⚠️ 下载头像文件失败: @{channel.username} - {e}")
+                            else:
+                                logger.debug(f"ℹ️ 频道没有头像文件ID: @{channel.username}")
                         except Exception as e:
-                            logger.warning(f"⚠️ 无法获取头像信息: {e}")
+                            logger.warning(f"⚠️ 无法获取头像信息: @{channel.username} - {e}")
+                    else:
+                        logger.debug(f"ℹ️ 频道没有设置头像: @{channel.username}")
 
                     # 获取成员数
                     try:
@@ -931,8 +937,8 @@ class TelegramBot:
                 logger.debug(f"⏭️ 头像文件已存在，跳过下载: {filename}")
                 return file_path
             
-            # 下载文件
-            await file.download(file_path)
+            # 下载文件（使用 download_to_drive 方法）
+            await file.download_to_drive(file_path)
             logger.info(f"✅ 已下载头像文件: {filename} (文件ID: {photo_file_id})")
             
             return file_path
